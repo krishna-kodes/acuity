@@ -141,7 +141,9 @@ function NavLink({ item, activePhase }: { item: NavItem; activePhase?: string | 
   );
 }
 
-export function AppSidebar({ projectId, activePhase, className }: AppSidebarProps) {
+export function AppSidebar({ projectId: projectIdProp, activePhase, className }: AppSidebarProps) {
+  const pathname = usePathname();
+  const projectId = projectIdProp ?? pathname.match(/\/projects\/([^/]+)/)?.[1];
   const projectNav = projectId ? buildProjectNav(projectId) : [];
 
   return (
