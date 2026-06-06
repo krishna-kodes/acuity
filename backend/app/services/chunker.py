@@ -50,7 +50,25 @@ def _split_to_max(text: str, max_tokens: int) -> list[str]:
             current = sentence
     if current:
         parts.append(current)
-    return parts or [text[: max_tokens * 4]]
+    # Fallback: word-split if sentence splitting didn't reduce below max_tokens
+    final: list[str] = []
+    for part in parts:
+        if _count_tokens(part) <= max_tokens:
+            final.append(part)
+        else:
+            words = part.split()
+            chunk = ""
+            for word in words:
+                candidate = (chunk + " " + word).strip()
+                if _count_tokens(candidate) <= max_tokens:
+                    chunk = candidate
+                else:
+                    if chunk:
+                        final.append(chunk)
+                    chunk = word
+            if chunk:
+                final.append(chunk)
+    return final or [text[: max_tokens * 4]]
 
 
 async def chunk_document(

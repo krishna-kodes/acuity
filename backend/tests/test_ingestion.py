@@ -146,14 +146,16 @@ async def test_chunk_section_hint_propagates():
     from app.services.chunker import chunk_document
     from app.services.ingestion import PageContent, ParsedDocument
 
+    long_para = "The system shall support OAuth 2.0 and related authentication flows. " * 5
     parsed = ParsedDocument(
         filename="req.pdf",
         pages=[PageContent(
             page_number=1,
-            text="2. Functional Requirements\n\nThe system shall support OAuth 2.0.\n\nThe system shall log all actions.",
+            text=f"2. Functional Requirements\n\n{long_para}",
             tables=[],
         )],
     )
     chunks = await chunk_document(parsed, "proj_1")
     non_headers = [c for c in chunks if c.detected_type != "header"]
+    assert len(non_headers) > 0, "Expected at least one non-header chunk"
     assert all(c.section_hint == "2. Functional Requirements" for c in non_headers)
