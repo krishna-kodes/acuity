@@ -40,7 +40,7 @@ cd backend
 python -m venv .venv
 source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-uvicorn main:app --reload
+uvicorn app.main:app --reload --port 8000
 # → http://localhost:8000/docs
 ```
 
@@ -52,8 +52,14 @@ uvicorn main:app --reload
 acuity/
 ├── frontend/          Next.js 14 App Router, Tailwind CSS, shadcn/ui
 ├── backend/           FastAPI + Uvicorn, SQLAlchemy, LangGraph
-├── evals/             Eval harness, graders, test cases
+│   ├── app/mcp/       GitHub MCP tools (FastMCP)
+│   ├── app/services/  Sync orchestration
+│   └── tests/         pytest suite
+├── evals/             Eval harness, graders, tool schemas
+├── fixtures/          Stub documents for eval test cases
 ├── results/           Eval run output (gitignored)
+├── test_cases.json    15 eval tasks with ground truth
+├── eval_suite.py      CI gate: python eval_suite.py --threshold 0.90
 └── docs/              Architecture, design handoff, design html
 ```
 
@@ -61,7 +67,9 @@ Key docs:
 - `CLAUDE.md` — full architecture and non-negotiable rules
 - `CONTRIBUTING.md` — branch strategy, pre/post task checklists
 - `EPICS_TASKS.md` — implementation plan (Epics 0–6)
-- `DESIGN_HANDOFF.md` — UI design file and screen inventory
+- `DESIGN_HANDOFF.md` — UI design file, screen inventory, implementation status
+- `TESTING.md` — acceptance criteria and AI engineering metrics coverage
+- `BACKEND_GAPS.md` — new endpoints discovered during frontend build
 - `.env.example` — all required environment variables
 
 ---
@@ -77,6 +85,27 @@ Key docs:
 | Embeddings | `text-embedding-3-small` (OpenAI, 1536 dims) |
 | Orchestration | LangGraph with SqliteSaver |
 | GitHub Sync | GitHub MCP server (milestones + issues) |
+
+---
+
+## Evals
+
+```bash
+# Install eval dependencies (separate from backend)
+pip install -r evals/requirements.txt
+
+# Offline baseline run (mock mode — no API keys needed)
+python eval_suite.py --threshold 0.0 --output results/baseline_eval_run_001.json --no-sync
+
+# Single test case
+python -m evals.harness --test-case tc-001
+
+# Full CI gate
+python eval_suite.py --threshold 0.90
+
+# Real mode (requires GOOGLE_API_KEY + running backend)
+EVAL_MODE=real python eval_suite.py --threshold 0.90
+```
 
 ---
 
