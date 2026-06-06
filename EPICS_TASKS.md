@@ -1,9 +1,50 @@
 # Epics and Tasks for Acuity
 
 ## Priority note
-- Frontend build is the highest priority.
+- **Epic 0 (Design System) is the first epic to implement** — all other frontend work depends on it.
+- Frontend build is the highest priority overall.
 - Backend work should begin only after the frontend app shell, route structure, and primary screens are defined.
 - Use this document to drive Claude-generated epics, tasks, and dependencies.
+
+## Epic 0: Design system and component library (Claude Design → code)
+
+### Description
+Translate the Claude Design file into a working component library before any page scaffolding begins. Extracts design tokens, configures Tailwind and shadcn/ui theming, and implements every reusable component referenced in the UI screens.
+
+**Claude Design file:** https://claude.ai/design/p/01159eb0-0c4b-4129-9342-c1bfa04efae0?file=AI+PM+Tool.html&via=share
+
+### Tasks
+1. Open the Claude Design file and extract design tokens:
+   - Color palette (primary, secondary, neutral, status colors for `pending | synced | skipped | failed`)
+   - Typography scale (font family, sizes, line heights, weights)
+   - Spacing scale and layout grid
+   - Border radius, shadow, and elevation values
+   - Icon set used
+2. Configure `tailwind.config.ts` with extracted tokens (extend theme, do not override defaults wholesale).
+3. Configure shadcn/ui theming (`components.json`, CSS variables in `globals.css`) to match the design tokens.
+4. Implement core reusable components (one component per task, each with a usage example):
+   - **`<PhaseProgressStepper>`** — 6-step stepper with `complete | in_progress | locked` states and "Proceed" / "Re-run Phase" actions
+   - **`<ProjectCard>`** — summary card for the dashboard project list
+   - **`<AppSidebar>`** — navigation sidebar with active phase highlight and metrics link
+   - **`<ChatThread>`** — message thread with user/assistant bubbles
+   - **`<TBDClarificationWidget>`** — per-TBD item with Answer / TBD / Out-of-Scope action selector and resolved/outstanding count
+   - **`<RedactionHighlight>`** — inline document viewer with PII spans highlighted and confirm/override controls
+   - **`<SyncStatusBadge>`** — status badge for `pending | synced | skipped | failed`
+   - **`<EpicTaskListItem>`** — epic or task row with title, estimated points, sync status, and skip control
+   - **`<MetricsStatCard>`** — single-value stat card used across all metrics tabs
+   - **`<MetricsLineChart>`** and **`<MetricsBarChart>`** — Recharts wrappers themed to design tokens
+5. Write a component index at `components/index.ts` that re-exports all of the above.
+6. Smoke-test all components in a single `app/design-system/page.tsx` preview route (not shipped to production).
+
+### Dependencies
+- Claude Design file must be accessible.
+- No backend dependency — all components use static/mock props.
+
+### Definition of done
+- All components render without error.
+- Design tokens match the Claude Design file (colors, type, spacing).
+- `app/design-system/page.tsx` shows every component in all relevant states.
+- Epic 1 can begin immediately after.
 
 ## Epic 1: Frontend scaffolding and core UI
 ### Description
@@ -27,7 +68,7 @@ Create the main application shell, route structure, navigation, and initial page
 6. Confirm the design handoff link and asset details in `DESIGN_HANDOFF.md`.
 
 ### Dependencies
-- None. This epic must complete before backend contract work begins.
+- Completion of Epic 0 (design system and component library).
 
 ## Epic 2: Frontend page implementation
 ### Description
