@@ -5,7 +5,12 @@ from app.database import get_db
 from app.models.enums import DocumentStatus
 from app.models.project import Document
 from app.schemas.clarification import ClarificationCreate, ClarificationResponse
-from app.schemas.document import DocumentResponse
+from app.schemas.document import (
+    DocumentResponse,
+    RedactionDecisionResponse,
+    RedactionDecisionsUpdate,
+    RedactionSummaryResponse,
+)
 from app.schemas.metrics import MetricsResponse
 from app.schemas.project import (
     EstimationResponse,
@@ -75,6 +80,88 @@ async def upload_document(
         status=doc.status.value,
         upload_ts=str(doc.upload_ts),
     )
+
+
+@router.get(
+    "/projects/{project_id}/redaction-decisions",
+    response_model=list[RedactionDecisionResponse],
+)
+def get_redaction_decisions(
+    project_id: str,
+    db: Session = Depends(get_db),
+) -> list[RedactionDecisionResponse]:
+    """List detected PII spans for PM review on the redaction screen."""
+    from app.models.pii import PIIDetection
+
+    docs = db.query(Document).filter(Document.project_id == int(project_id)).all()
+    if not docs:
+        return []
+
+    doc_ids = [d.id for d in docs]
+    detections = (
+        db.query(PIIDetection).filter(PIIDetection.document_id.in_(doc_ids)).all()
+    )
+    return [
+        RedactionDecisionResponse(
+            id=det.id,
+            text_replacement=det.text_replacement,
+            pii_type=det.pii_type,
+            detection_method=det.detection_method,
+            confirmed=det.confirmed,
+            overridden=det.overridden,
+        )
+        for det in detections
+    ]
+
+
+@router.patch(
+    "/projects/{project_id}/redaction-decisions",
+    response_model=RedactionSummaryResponse,
+)
+def apply_redaction_decisions(
+    project_id: str,
+    body: RedactionDecisionsUpdate,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+) -> RedactionSummaryResponse:
+    """PM confirms or overrides each PII span; triggers ingestion completion."""
+    from app.models.pii import PIIDetection
+    from app.services.ingestion import complete_ingestion
+
+    applied = 0
+    skipped = 0
+
+    for item in body.decisions:
+        det = db.query(PIIDetection).filter(PIIDetection.id == item.detection_id).first()
+        if det is None:
+            continue
+        if item.confirmed:
+            det.confirmed = True
+            det.overridden = False
+            applied += 1
+        else:
+            det.confirmed = False
+            det.overridden = True
+            skipped += 1
+
+    db.commit()
+
+    # Find the document for this project and queue ingestion completion
+    doc = (
+        db.query(Document)
+        .filter(
+            Document.project_id == int(project_id),
+            Document.status == DocumentStatus.anonymising,
+        )
+        .first()
+    )
+    if doc:
+        background_tasks.add_task(complete_ingestion, doc.id, int(project_id), db)
+        status = "ingestion_queued"
+    else:
+        status = "ingestion_skipped"
+
+    return RedactionSummaryResponse(applied=applied, skipped=skipped, status=status)
 
 
 @router.get("/projects/{project_id}/tbds", response_model=list[TBDItem])
