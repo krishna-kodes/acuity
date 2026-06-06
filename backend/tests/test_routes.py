@@ -3,16 +3,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-ENDPOINTS = [
-    ("POST", "/api/v1/projects", {"name": "Test Project"}),
-    ("GET", "/api/v1/projects/stub-id/tbds", None),
-    ("POST", "/api/v1/projects/stub-id/clarifications", {"tbd_id": "t1", "action": "TBD"}),
-    ("POST", "/api/v1/projects/stub-id/proposal", None),
-    ("GET", "/api/v1/projects/stub-id/proposal", None),
-    ("POST", "/api/v1/projects/stub-id/stack", None),
-    ("POST", "/api/v1/projects/stub-id/estimate", None),
-    ("POST", "/api/v1/projects/stub-id/sync", None),
-    ("GET", "/api/v1/projects/stub-id/metrics", None),
+SIMPLE_ENDPOINTS = [
     ("POST", "/api/v1/factory/seed-employees", None),
     ("POST", "/api/v1/factory/seed-projects", None),
     ("POST", "/api/v1/factory/seed-technologies", None),
@@ -20,12 +11,41 @@ ENDPOINTS = [
     ("DELETE", "/api/v1/factory/reset-db", None),
 ]
 
+PROJECT_ENDPOINTS = [
+    ("GET", "tbds", None),
+    ("POST", "clarifications", {"tbd_id": "t1", "action": "TBD"}),
+    ("POST", "proposal", None),
+    ("GET", "proposal", None),
+    ("POST", "stack", None),
+    ("POST", "estimate", None),
+    ("POST", "sync", None),
+    ("GET", "metrics", None),
+]
 
-@pytest.mark.parametrize("method,path,body", ENDPOINTS)
-def test_endpoint_returns_2xx(client, method, path, body):
+
+@pytest.mark.parametrize("method,path,body", SIMPLE_ENDPOINTS)
+def test_simple_endpoint_returns_2xx(client, method, path, body):
     kwargs = {"json": body} if body is not None else {}
     resp = getattr(client, method.lower())(path, **kwargs)
     assert resp.status_code < 300, f"{method} {path} → {resp.status_code}: {resp.text}"
+
+
+@pytest.mark.parametrize("sub,body", [(s, b) for _, s, b in PROJECT_ENDPOINTS])
+def test_project_endpoint_returns_2xx(client, project_id, sub, body):
+    method = "post" if sub in {"clarifications", "proposal", "stack", "estimate", "sync"} else "get"
+    path = f"/api/v1/projects/{project_id}/{sub}"
+    kwargs = {"json": body} if body is not None else {}
+    resp = getattr(client, method)(path, **kwargs)
+    assert resp.status_code < 300, f"{method.upper()} {path} → {resp.status_code}: {resp.text}"
+
+
+def test_create_project(client):
+    resp = client.post("/api/v1/projects", json={"name": "My Project"})
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["name"] == "My Project"
+    assert "id" in data
+    assert data["current_phase"] == 1
 
 
 def test_upload_document(client):
@@ -59,14 +79,8 @@ def test_upload_document(client):
     assert resp.status_code < 300
 
 
-def test_create_project_returns_name(client):
-    resp = client.post("/api/v1/projects", json={"name": "My Project"})
-    assert resp.status_code == 201
-    assert resp.json()["name"] == "My Project"
-
-
-def test_sync_response_has_status(client):
-    resp = client.post("/api/v1/projects/stub-id/sync")
+def test_sync_response_has_status(client, project_id):
+    resp = client.post(f"/api/v1/projects/{project_id}/sync")
     assert "status" in resp.json()
 
 

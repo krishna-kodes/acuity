@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     observability_provider: str = "langsmith"
     langsmith_api_key: str = ""
     faker_seed: int = 42
+    seed_employee_count: int = 20
+    seed_project_count: int = 15
+    seed_technology_count: int = 22
     metrics_enabled: bool = True
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
