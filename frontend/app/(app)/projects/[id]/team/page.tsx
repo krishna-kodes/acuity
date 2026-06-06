@@ -4,17 +4,8 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { PhaseProgressStepper } from "@/components/phase-progress-stepper";
 import { ReviewPageSkeleton, ErrorBanner } from "@/components/page-states";
+import { getPhasesForRoute, getNextPhaseRoute } from "@/lib/project-phases";
 import { cn } from "@/lib/utils";
-import type { Phase } from "@/components/phase-progress-stepper";
-
-const PHASES: Phase[] = [
-  { label: "Ingestion",    status: "complete" },
-  { label: "Refinement",   status: "complete" },
-  { label: "Tech Stack",   status: "complete" },
-  { label: "Team",         status: "in_progress" },
-  { label: "Estimation",   status: "locked" },
-  { label: "Epics & Sync", status: "locked" },
-];
 
 interface TeamMember {
   name: string;
@@ -75,12 +66,12 @@ export default function TeamPage({ params }: { params: { id: string } }) {
     setProceeding(true);
     // TODO (Epic 4): POST /api/v1/projects/{id}/phases/5/start
     await new Promise((res) => setTimeout(res, 800));
-    router.push(`/projects/${params.id}/estimation`);
+    router.push(getNextPhaseRoute("team", params.id));
   }
 
   return (
     <div className="px-6 py-8 max-w-4xl mx-auto flex flex-col gap-6">
-      <PhaseProgressStepper phases={PHASES} />
+      <PhaseProgressStepper phases={getPhasesForRoute("team")} />
 
       <div className="flex flex-col gap-4">
         <div>

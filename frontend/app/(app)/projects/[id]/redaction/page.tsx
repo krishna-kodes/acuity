@@ -4,17 +4,8 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { PhaseProgressStepper } from "@/components/phase-progress-stepper";
 import { RedactionHighlight } from "@/components/redaction-highlight";
-import type { Phase } from "@/components/phase-progress-stepper";
+import { getPhasesForRoute, getNextPhaseRoute } from "@/lib/project-phases";
 import type { RedactionSpan } from "@/components/redaction-highlight";
-
-const PHASES: Phase[] = [
-  { label: "Ingestion",    status: "in_progress" },
-  { label: "Refinement",   status: "locked" },
-  { label: "Tech Stack",   status: "locked" },
-  { label: "Team",         status: "locked" },
-  { label: "Estimation",   status: "locked" },
-  { label: "Epics & Sync", status: "locked" },
-];
 
 // TODO (Epic 4): fetch from GET /api/v1/projects/{id}/tbds and pii_detections
 const MOCK_DETECTIONS: RedactionSpan[] = [
@@ -52,14 +43,14 @@ export default function RedactionPage({ params }: { params: { id: string } }) {
     setProceeding(true);
     // TODO (Epic 4): PATCH /api/v1/projects/{id}/redaction-decisions then POST /api/v1/projects/{id}/phases/2/start
     await new Promise((res) => setTimeout(res, 800));
-    router.push(`/projects/${params.id}/chat`);
+    router.push(getNextPhaseRoute("redaction", params.id));
   }
 
   return (
     <div className="px-6 py-8 max-w-4xl mx-auto flex flex-col gap-6">
 
       {/* Phase stepper */}
-      <PhaseProgressStepper phases={PHASES} />
+      <PhaseProgressStepper phases={getPhasesForRoute("redaction")} />
 
       {/* Content */}
       <div className="flex flex-col gap-4">

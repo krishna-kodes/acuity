@@ -5,19 +5,10 @@ import { useRouter } from "next/navigation";
 import { PhaseProgressStepper } from "@/components/phase-progress-stepper";
 import { ChatThread } from "@/components/chat-thread";
 import { TBDClarificationWidget } from "@/components/tbd-clarification-widget";
-import type { Phase } from "@/components/phase-progress-stepper";
+import { getPhasesForRoute, getNextPhaseRoute } from "@/lib/project-phases";
 import type { ChatMessage } from "@/components/chat-thread";
 import type { TBDItem, TBDAction } from "@/components/tbd-clarification-widget";
 import { cn } from "@/lib/utils";
-
-const PHASES: Phase[] = [
-  { label: "Ingestion",    status: "complete" },
-  { label: "Refinement",   status: "in_progress" },
-  { label: "Tech Stack",   status: "locked" },
-  { label: "Team",         status: "locked" },
-  { label: "Estimation",   status: "locked" },
-  { label: "Epics & Sync", status: "locked" },
-];
 
 const INITIAL_MESSAGES: ChatMessage[] = [
   {
@@ -135,14 +126,14 @@ export default function ChatPage({ params }: { params: { id: string } }) {
     setGenerating(true);
     // TODO (Epic 4): POST /api/v1/projects/{id}/proposal
     await new Promise((res) => setTimeout(res, 1500));
-    router.push(`/projects/${params.id}/techstack`);
+    router.push(getNextPhaseRoute("chat", params.id));
   }
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
       {/* Phase stepper + header — fixed top area */}
       <div className="px-6 pt-6 pb-4 border-b border-border shrink-0">
-        <PhaseProgressStepper phases={PHASES} className="mb-4" />
+        <PhaseProgressStepper phases={getPhasesForRoute("chat")} className="mb-4" />
       </div>
 
       {/* Main content — fills remaining height */}
