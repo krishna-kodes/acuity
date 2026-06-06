@@ -23,6 +23,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 9. **LLM provider switchable via env var** — never hardcode `google` or `anthropic`
 10. **GitHub MCP only** — no Jira references anywhere in codebase
 11. **Two separate SQLite databases** — `app.db` for application data, `project_state.db` for LangGraph checkpoints
+12. **Use `google-genai` SDK, not `google-generativeai`** — `google-generativeai` is deprecated/EOL. Use `langchain-google-genai` for LangChain integration. Models: `gemini-2.5-pro` (main), `gemini-2.5-flash` (fast).
 
 ---
 
