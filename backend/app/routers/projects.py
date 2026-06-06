@@ -1,11 +1,18 @@
+import json
 import os
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models.enums import DocumentStatus, ProjectPhase, ProjectStatus, TBDStatus, TBDAction
+from app.models.enums import (
+    DocumentStatus,
+    ProjectPhase,
+    ProjectStatus,
+    TBDAction,
+    TBDStatus,
+)
 from app.models.project import Document, Project, Proposal
 from app.schemas.clarification import ClarificationCreate, ClarificationResponse
 from app.schemas.document import (
@@ -16,6 +23,7 @@ from app.schemas.document import (
 )
 from app.schemas.metrics import MetricsResponse
 from app.schemas.project import (
+    ChatRequest,
     EstimationResponse,
     ProjectCreate,
     ProjectResponse,
@@ -26,6 +34,7 @@ from app.schemas.project import (
 from app.schemas.proposal import ProposalResponse
 from app.schemas.sync import SyncResponse
 from app.services.ingestion import ingest_document
+from app.services.workflow import get_workflow
 
 router = APIRouter(tags=["projects"])
 
@@ -472,6 +481,58 @@ def sync_to_github(
     from app.services.github_sync import sync_epics_to_github
     result = sync_epics_to_github(epics=[])
     return SyncResponse(**result)
+
+
+@router.post(
+    "/projects/{project_id}/chat",
+    summary="Phase 2 RAG chat turn (SSE)",
+)
+async def chat(
+    project_id: str,
+    body: ChatRequest,
+    db: Session = Depends(get_db),
+) -> StreamingResponse:
+    wf = get_workflow()
+    config = {"configurable": {"thread_id": project_id}}
+
+    existing = wf.get_state(config)
+    history = list(existing.values.get("chat_messages") or [])
+    history.append({"role": "user", "content": body.message})
+
+    state_update = {"chat_messages": history, "chat_proceed": body.proceed}
+
+    async def event_generator():
+        try:
+            async for event in wf.astream_events(
+                state_update, config=config, version="v2"
+            ):
+                etype = event["event"]
+                name = event.get("name", "")
+
+                if etype == "on_chat_model_stream" and "GroundednessResult" not in name:
+                    token = event["data"]["chunk"].content
+                    if token:
+                        yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
+
+                elif etype == "on_chain_end" and name == "chat_turn":
+                    output = event["data"].get("output", {})
+                    if tbds := output.get("tbd_items"):
+                        yield f"data: {json.dumps({'type': 'tbds', 'items': tbds})}\n\n"
+                    if (gs := output.get("groundedness_score")) is not None:
+                        from app.config import settings
+                        flagged = gs < settings.groundedness_threshold
+                        payload = {"type": "groundedness", "score": gs, "flagged": flagged}
+                        yield f"data: {json.dumps(payload)}\n\n"
+
+            yield f"data: {json.dumps({'type': 'done'})}\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'type': 'error', 'content': str(e)})}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.get("/projects/{project_id}/metrics", response_model=MetricsResponse)

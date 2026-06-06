@@ -38,3 +38,8 @@ def get_llm(fast: bool = False) -> BaseChatModel:
         )
 
     raise ValueError(f"Unknown LLM provider: {provider!r}. Expected 'google' or 'anthropic'.")
+
+
+def get_fast_llm() -> BaseChatModel:
+    """Convenience wrapper — returns the fast/cheap LLM."""
+    return get_llm(fast=True)

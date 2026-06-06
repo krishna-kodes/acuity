@@ -4,7 +4,9 @@ Phases 1–3 are deterministic pipeline nodes (stubs; real logic wired in E5-T6)
 Phases 4–6 are LangGraph ReAct agents.
 
 Usage:
-    result = await run_phase(project_id="42", state_update={"phase_status": {"phase_1": "complete"}})
+    result = await run_phase(
+        project_id="42", state_update={"phase_status": {"phase_1": "complete"}}
+    )
 """
 
 import asyncio
@@ -16,7 +18,12 @@ from langchain_core.tools import tool
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, StateGraph
 from langgraph.prebuilt import create_react_agent
+from pydantic import BaseModel
 
+# Module-level imports so tests can patch app.services.workflow.<name>
+from app.services.llm_factory import get_llm
+from app.services.rag import retrieve
+from app.services.tbd_detection import detect_tbds
 
 # ---------------------------------------------------------------------------
 # State
@@ -33,6 +40,9 @@ class ProjectState(TypedDict):
     epics: list
     metrics: dict
     phase_status: dict  # {"phase_1": "complete", "phase_2": "in_progress", ...}
+    chat_messages: list          # NEW: list of {"role": str, "content": str}
+    chat_proceed: bool           # NEW: set True by PM to exit chat loop
+    groundedness_score: float | None  # NEW: last groundedness check score
 
 
 _EMPTY_STATE: ProjectState = {
@@ -46,7 +56,27 @@ _EMPTY_STATE: ProjectState = {
     "epics": [],
     "metrics": {},
     "phase_status": {},
+    "chat_messages": [],
+    "chat_proceed": False,
+    "groundedness_score": None,
 }
+
+
+class _GroundednessResult(BaseModel):
+    score: float
+    reasoning: str
+    unsupported_claims: list[str]
+
+
+_GROUNDEDNESS_PROMPT = (
+    "System: You are an evaluation judge. Answer only with a JSON object.\n"
+    "User:\n"
+    "  Context: {context}\n"
+    "  Response: {response}\n"
+    "  Question: Is every factual claim in the Response directly supported by the Context?\n"
+    "  Score 0-1 where 1 = fully grounded, 0 = contains unsupported claims.\n"
+    '  Output: {{"score": float, "reasoning": str, "unsupported_claims": list[str]}}'
+)
 
 
 # ---------------------------------------------------------------------------
@@ -130,16 +160,78 @@ _PHASE_6_TOOLS = [generate_epics_tool]
 # Phase nodes
 # ---------------------------------------------------------------------------
 
-@with_retry()
-async def _phase_2_chat_node(state: ProjectState) -> dict[str, Any]:
-    """Phase 2: Chat & refinement — detect TBDs, surface clarifications.
-
-    Stub: marks phase in_progress. Real RAG pipeline wired in E5-T6.
-    """
+async def _phase_2_init_node(state: ProjectState) -> dict[str, Any]:
+    """Phase 2: initialise chat loop — sets phase in_progress, resets chat state."""
     _require_phase_complete(state, 2)
     ps = dict(state.get("phase_status") or {})
     ps["phase_2"] = "in_progress"
+    return {"phase_status": ps, "chat_messages": [], "chat_proceed": False}
+
+
+@with_retry()
+async def _chat_turn_node(state: ProjectState) -> dict[str, Any]:
+    """One RAG chat turn: retrieve -> detect TBDs -> LLM response -> groundedness check."""
+    from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+
+    from app.config import settings
+
+    messages = list(state.get("chat_messages") or [])
+    project_id = state["project_id"]
+    last_user = next(
+        (m["content"] for m in reversed(messages) if m["role"] == "user"), ""
+    )
+
+    chunks = await retrieve(project_id, last_user)
+    context = "\n\n".join(
+        f"[{c.get('section_hint', '')}] {c['text']}" for c in chunks
+    )
+
+    known = {t.get("text", "") for t in (state.get("tbd_items") or [])}
+    new_tbds = await detect_tbds(last_user, chunks, known_tbds=known)
+
+    lc_messages = [
+        SystemMessage(content=f"Answer using only this context:\n\n{context}"),
+        *[
+            HumanMessage(content=m["content"]) if m["role"] == "user"
+            else AIMessage(content=m["content"])
+            for m in messages
+        ],
+    ]
+    llm = get_llm()
+    response_parts: list[str] = []
+    async for chunk in llm.astream(lc_messages):
+        if isinstance(chunk.content, str):
+            response_parts.append(chunk.content)
+    response_content = "".join(response_parts)
+
+    groundedness_score = None
+    if settings.groundedness_check_enabled:
+        judge = llm.with_structured_output(_GroundednessResult)
+        gs = await judge.ainvoke([
+            HumanMessage(content=_GROUNDEDNESS_PROMPT.format(
+                context=context, response=response_content
+            ))
+        ])
+        groundedness_score = float(gs.score) if hasattr(gs, "score") else None
+
+    messages.append({"role": "assistant", "content": response_content})
+    return {
+        "chat_messages": messages,
+        "tbd_items": list(state.get("tbd_items") or []) + new_tbds,
+        "groundedness_score": groundedness_score,
+    }
+
+
+async def _phase_2_complete_node(state: ProjectState) -> dict[str, Any]:
+    """Marks Phase 2 complete when PM clicks Proceed."""
+    ps = dict(state.get("phase_status") or {})
+    ps["phase_2"] = "complete"
     return {"phase_status": ps}
+
+
+def _chat_routing(state: ProjectState) -> str:
+    """Pure routing function — returns next node name, never mutates state."""
+    return "phase_2_complete" if state.get("chat_proceed") else "chat_turn"
 
 
 @with_retry()
@@ -276,24 +368,28 @@ def build_workflow():
 
     workflow = StateGraph(ProjectState)
 
-    workflow.add_node("phase_2_chat", _phase_2_chat_node)
-    workflow.add_node("phase_3_stack", _phase_3_stack_node)
-    workflow.add_node("phase_4_team", _phase_4_team_node)
+    workflow.add_node("phase_2_init",     _phase_2_init_node)
+    workflow.add_node("chat_turn",        _chat_turn_node)
+    workflow.add_node("phase_2_complete", _phase_2_complete_node)
+    workflow.add_node("phase_3_stack",    _phase_3_stack_node)
+    workflow.add_node("phase_4_team",     _phase_4_team_node)
     workflow.add_node("phase_5_estimate", _phase_5_estimate_node)
-    workflow.add_node("phase_6_epics", _phase_6_epics_node)
+    workflow.add_node("phase_6_epics",    _phase_6_epics_node)
 
-    workflow.set_entry_point("phase_2_chat")
-    workflow.add_edge("phase_2_chat", "phase_3_stack")
-    workflow.add_edge("phase_3_stack", "phase_4_team")
-    workflow.add_edge("phase_4_team", "phase_5_estimate")
+    workflow.set_entry_point("phase_2_init")
+    workflow.add_edge("phase_2_init",     "chat_turn")
+    workflow.add_conditional_edges("chat_turn", _chat_routing)
+    workflow.add_edge("phase_2_complete", "phase_3_stack")
+    workflow.add_edge("phase_3_stack",    "phase_4_team")
+    workflow.add_edge("phase_4_team",     "phase_5_estimate")
     workflow.add_edge("phase_5_estimate", "phase_6_epics")
-    workflow.add_edge("phase_6_epics", END)
+    workflow.add_edge("phase_6_epics",    END)
 
     return workflow.compile(
         checkpointer=checkpointer,
         # Pause after each phase so the PM can review before proceeding
         interrupt_after=[
-            "phase_2_chat",
+            "chat_turn",
             "phase_3_stack",
             "phase_4_team",
             "phase_5_estimate",

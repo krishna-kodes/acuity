@@ -48,3 +48,8 @@ class EstimationResponse(BaseModel):
     epics: list[dict]
     total_points: int
     total_weeks: float
+
+
+class ChatRequest(BaseModel):
+    message: str
+    proceed: bool = False
