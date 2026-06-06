@@ -33,4 +33,4 @@ class Clarification(Base):
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
     )
 
-    project: Mapped[Project] = relationship("Project")
+    project: Mapped[Project] = relationship("Project", back_populates="clarifications")

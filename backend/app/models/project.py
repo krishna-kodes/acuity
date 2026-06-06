@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy import Enum as SAEnum
@@ -6,6 +7,9 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
 from app.models.enums import DocumentStatus, ProjectPhase, ProjectStatus
+
+if TYPE_CHECKING:
+    from app.models.clarification import Clarification
 
 
 class Project(Base):
@@ -29,6 +33,9 @@ class Project(Base):
     proposals: Mapped[list["Proposal"]] = relationship(back_populates="project")
     proposal_state: Mapped["ProposalState | None"] = relationship(
         back_populates="project", uselist=False
+    )
+    clarifications: Mapped[list["Clarification"]] = relationship(
+        back_populates="project"
     )
 
 
