@@ -138,13 +138,13 @@ def suggest_stack(
     project_id: str,
     db: Session = Depends(get_db),
 ) -> TechStackResponse:
-    # TODO(Epic 5 #37): run tech stack suggestion agent node
+    # TODO(E5-T6): load LangGraph state, enforce phase guard, invoke run_phase()
     return TechStackResponse(
         frontend=["Next.js"],
         backend=["FastAPI"],
         database=["SQLite"],
         infra=["Railway"],
-        rationale="Stub rationale — populated by LangGraph in Epic 5.",
+        rationale="Stub rationale — populated by LangGraph in E5-T6.",
     )
 
 
@@ -153,7 +153,7 @@ def estimate_effort(
     project_id: str,
     db: Session = Depends(get_db),
 ) -> EstimationResponse:
-    # TODO(Epic 5 #37): run effort estimation agent node
+    # TODO(E5-T6): load LangGraph state, enforce phase guard, invoke run_phase()
     return EstimationResponse(
         epics=[{"title": "Stub Epic", "estimated_points": 8, "confidence": 0.8}],
         total_points=8,
