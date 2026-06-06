@@ -97,7 +97,11 @@ async def test_chunk_detects_list_items():
         filename="req.pdf",
         pages=[PageContent(
             page_number=1,
-            text="- The system shall support OAuth 2.0\n- Response time < 200ms\n* Must handle 1000 concurrent users",
+            text=(
+                "- The system shall support OAuth 2.0\n"
+                "- Response time < 200ms\n"
+                "* Must handle 1000 concurrent users"
+            ),
             tables=[],
         )],
     )
@@ -219,3 +223,82 @@ async def test_embed_and_store_empty_returns_zero():
     from app.services.embedder import embed_and_store
     result = await embed_and_store([])
     assert result == 0
+
+
+# ── Ingestion orchestrator tests ─────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_ingest_document_cache_hit(tmp_path, monkeypatch):
+    """Second call to ingest_document with same project_id is a no-op."""
+    monkeypatch.setenv("CHROMA_PERSIST_PATH", str(tmp_path))
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    mock_collection = MagicMock()
+    mock_collection.count.return_value = 5  # already has embeddings
+
+    embed_call_count = {"n": 0}
+
+    async def fake_embed(chunks):
+        embed_call_count["n"] += 1
+        return len(chunks)
+
+    with patch("app.services.embedder.chromadb.PersistentClient") as mock_client, \
+         patch("app.services.embedder.OpenAIEmbeddingFunction"), \
+         patch("app.services.embedder.embed_and_store", fake_embed):
+        # Make list_collections return the project so collection_exists returns True
+        mock_collection_info = MagicMock()
+        mock_collection_info.name = "project_99"
+        mock_client.return_value.list_collections.return_value = [mock_collection_info]
+        mock_client.return_value.get_collection.return_value = mock_collection
+        mock_client.return_value.get_or_create_collection.return_value = mock_collection
+
+        from importlib import reload
+
+        import app.services.ingestion as ing_mod
+        reload(ing_mod)
+
+        result = await ing_mod.ingest_document(
+            document_id=1, project_id=99, file_path="/fake/doc.pdf", db=MagicMock()
+        )
+
+    assert result == 5          # returned existing count
+    assert embed_call_count["n"] == 0  # embed_and_store never called
+
+
+@pytest.mark.asyncio
+async def test_ingest_document_updates_status(tmp_path, monkeypatch):
+    """ingest_document sets Document.status = ready after ingestion."""
+    monkeypatch.setenv("CHROMA_PERSIST_PATH", str(tmp_path))
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    mock_db = MagicMock()
+    mock_collection = MagicMock()
+    mock_collection.count.return_value = 0
+
+    mock_page = MagicMock()
+    mock_page.extract_text.return_value = (
+        "The system shall support OAuth 2.0 login and session management."
+    )
+    mock_page.extract_tables.return_value = []
+    mock_pdf = MagicMock()
+    mock_pdf.__enter__ = lambda s: s
+    mock_pdf.__exit__ = MagicMock(return_value=False)
+    mock_pdf.pages = [mock_page]
+
+    with patch("app.services.embedder.chromadb.PersistentClient") as mock_client, \
+         patch("app.services.embedder.OpenAIEmbeddingFunction"), \
+         patch("pdfplumber.open", return_value=mock_pdf):
+        # No existing collections → collection_exists returns False
+        mock_client.return_value.list_collections.return_value = []
+        mock_client.return_value.get_or_create_collection.return_value = mock_collection
+
+        from importlib import reload
+
+        import app.services.ingestion as ing_mod
+        reload(ing_mod)
+
+        await ing_mod.ingest_document(
+            document_id=7, project_id=3, file_path="/fake/req.pdf", db=mock_db
+        )
+
+    mock_db.commit.assert_called_once()

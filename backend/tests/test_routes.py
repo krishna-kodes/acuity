@@ -1,4 +1,5 @@
 import io
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -28,11 +29,33 @@ def test_endpoint_returns_2xx(client, method, path, body):
 
 
 def test_upload_document(client):
+    mock_db = MagicMock()
+    mock_doc = MagicMock()
+    mock_doc.id = 1
+    mock_doc.filename = "test.pdf"
+    mock_doc.status = MagicMock()
+    mock_doc.status.value = "uploaded"
+    mock_doc.upload_ts = "2026-01-01T00:00:00"
+    mock_db.refresh.side_effect = lambda obj: None
+
+    from app.database import get_db
+    from app.main import app
+
+    def mock_get_db():
+        return mock_db
+
+    app.dependency_overrides[get_db] = mock_get_db
+
     data = io.BytesIO(b"fake pdf content")
-    resp = client.post(
-        "/api/v1/projects/stub-id/documents",
-        files={"file": ("test.pdf", data, "application/pdf")},
-    )
+    with patch("app.routers.projects.Document") as MockDocument, \
+         patch("app.routers.projects.ingest_document"):
+        MockDocument.return_value = mock_doc
+        resp = client.post(
+            "/api/v1/projects/1/documents",
+            files={"file": ("test.pdf", data, "application/pdf")},
+        )
+
+    app.dependency_overrides[get_db] = lambda: None
     assert resp.status_code < 300
 
 
