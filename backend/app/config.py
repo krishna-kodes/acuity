@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     top_k_retrieval: int = 20
     top_n_rerank: int = 4
     query_rewrite_count: int = 3
+    groundedness_check_enabled: bool = True
     groundedness_threshold: float = 0.7
     max_cost_per_workflow_usd: float = 0.50
     observability_provider: str = "langsmith"
