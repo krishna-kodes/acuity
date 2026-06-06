@@ -29,7 +29,13 @@ out/
 chroma_db/
 project_state.db
 app.db
+app.db-shm
+app.db-wal
 documents/
+
+# Playwright
+frontend/test-results/
+frontend/playwright-report/
 
 # Eval results (keep directory, ignore output files)
 results/*.json
