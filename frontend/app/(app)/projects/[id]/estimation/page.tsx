@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, use } from "react";
 import { useRouter } from "next/navigation";
 import { PhaseProgressStepper } from "@/components/phase-progress-stepper";
 import { MetricsStatCard } from "@/components/metrics-stat-card";
@@ -38,7 +38,8 @@ const totalMid  = MOCK_ESTIMATES.reduce((s, r) => s + r.mid, 0);
 const totalLow  = MOCK_ESTIMATES.reduce((s, r) => s + r.low, 0);
 const totalHigh = MOCK_ESTIMATES.reduce((s, r) => s + r.high, 0);
 
-export default function EstimationPage({ params }: { params: { id: string } }) {
+export default function EstimationPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = use(params);
   const router = useRouter();
   const [proceeding, setProceeding] = useState(false);
 
@@ -46,7 +47,7 @@ export default function EstimationPage({ params }: { params: { id: string } }) {
     setProceeding(true);
     // TODO (Epic 4): POST /api/v1/projects/{id}/phases/6/start
     await new Promise((res) => setTimeout(res, 800));
-    router.push(getNextPhaseRoute("estimation", params.id));
+    router.push(getNextPhaseRoute("estimation", id));
   }
 
   return (

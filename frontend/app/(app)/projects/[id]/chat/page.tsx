@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, use } from "react";
 import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { PhaseProgressStepper } from "@/components/phase-progress-stepper";
@@ -42,7 +42,8 @@ function simulatedReply(userText: string): string {
   return "Thanks — I've noted that. Is there anything else in the document you'd like to clarify before we generate the proposal?";
 }
 
-export default function ChatPage({ params }: { params: { id: string } }) {
+export default function ChatPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id: projectId } = use(params);
   const router = useRouter();
   const [messages, setMessages]     = useState<ChatMessage[]>(INITIAL_MESSAGES);
   const [localStatuses, setLocalStatuses] = useState<Record<string, TBDAction>>({});
@@ -53,9 +54,9 @@ export default function ChatPage({ params }: { params: { id: string } }) {
   const bottomRef   = useRef<HTMLDivElement>(null);
 
   const { data: remoteTbds } = useQuery({
-    queryKey: ["tbds", params.id],
+    queryKey: ["tbds", projectId],
     queryFn: async () => {
-      const { data, error } = await getTBDs(params.id);
+      const { data, error } = await getTBDs(projectId);
       if (error) throw new Error(String(error));
       return (data ?? []).map((t) => ({
         id: t.id,
@@ -116,7 +117,7 @@ export default function ChatPage({ params }: { params: { id: string } }) {
 
   function handleTBDAction(id: string, action: TBDAction) {
     setLocalStatuses((prev) => ({ ...prev, [id]: action }));
-    submitClarification(params.id, id, action).catch(() => {
+    submitClarification(projectId, id, action).catch(() => {
       // Fire-and-forget; local state already updated
     });
   }
@@ -124,11 +125,11 @@ export default function ChatPage({ params }: { params: { id: string } }) {
   async function handleGenerateProposal() {
     setGenerating(true);
     try {
-      await generateProposal(params.id);
+      await generateProposal(projectId);
     } catch {
       // Non-fatal — navigate regardless
     }
-    router.push(getNextPhaseRoute("chat", params.id));
+    router.push(getNextPhaseRoute("chat", projectId));
   }
 
   return (

@@ -7,7 +7,7 @@ import { ReviewPageSkeleton, ErrorBanner } from "@/components/page-states";
 import { getPhasesForRoute, getNextPhaseRoute } from "@/lib/project-phases";
 import { suggestStack } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import { useState } from "react";
+import { useState, use } from "react";
 
 interface TechItem {
   name: string;
@@ -38,14 +38,15 @@ function mapStackToItems(data: {
   );
 }
 
-export default function TechStackPage({ params }: { params: { id: string } }) {
+export default function TechStackPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = use(params);
   const router = useRouter();
   const [proceeding, setProceeding] = useState(false);
 
   const { data, isLoading, isError, error, refetch } = useQuery({
-    queryKey: ["techstack", params.id],
+    queryKey: ["techstack", id],
     queryFn: async () => {
-      const { data, error } = await suggestStack(params.id);
+      const { data, error } = await suggestStack(id);
       if (error) throw new Error(String(error));
       return data;
     },
@@ -65,7 +66,7 @@ export default function TechStackPage({ params }: { params: { id: string } }) {
 
   function handleProceed() {
     setProceeding(true);
-    router.push(getNextPhaseRoute("techstack", params.id));
+    router.push(getNextPhaseRoute("techstack", id));
   }
 
   return (

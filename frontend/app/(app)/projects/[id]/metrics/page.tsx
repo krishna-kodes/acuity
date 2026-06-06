@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, use } from "react";
 import { PhaseProgressStepper } from "@/components/phase-progress-stepper";
 import { MetricsStatCard } from "@/components/metrics-stat-card";
 import { MetricsLineChart } from "@/components/metrics-line-chart";
@@ -238,7 +238,8 @@ function TabLatency() {
 
 // ── Page ─────────────────────────────────────────────────────────────────────
 
-export default function MetricsPage({ params: _ }: { params: { id: string } }) {
+export default function MetricsPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id: _id } = use(params);
   const [activeTab, setActiveTab] = useState<Tab>("Token Usage & Cost");
 
   return (

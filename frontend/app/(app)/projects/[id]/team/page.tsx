@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, use } from "react";
 import { useRouter } from "next/navigation";
 import { PhaseProgressStepper } from "@/components/phase-progress-stepper";
 import { ReviewPageSkeleton, ErrorBanner } from "@/components/page-states";
@@ -46,7 +46,8 @@ function MatchBadge({ score }: { score: number }) {
   );
 }
 
-export default function TeamPage({ params }: { params: { id: string } }) {
+export default function TeamPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = use(params);
   const router = useRouter();
   const [loading, setLoading]       = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
@@ -66,7 +67,7 @@ export default function TeamPage({ params }: { params: { id: string } }) {
     setProceeding(true);
     // TODO (Epic 4): POST /api/v1/projects/{id}/phases/5/start
     await new Promise((res) => setTimeout(res, 800));
-    router.push(getNextPhaseRoute("team", params.id));
+    router.push(getNextPhaseRoute("team", id));
   }
 
   return (
