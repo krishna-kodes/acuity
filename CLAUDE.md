@@ -1,36 +1,121 @@
-# AI-Driven Project Management Tool — Claude Code Handover
+# CLAUDE.md
 
-> **Purpose:** Full context handover for Claude Code. Read this before touching any file.
-> **Last updated:** June 2026
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
----
+> **Source code has not yet been added.** This file documents the planned architecture and locked decisions. Update the Commands section once scaffolding exists.
 
-## 1. What This Project Is
-
-A capstone AI engineering project. A PM uploads a requirements document (PDF/DOCX), refines it through an AI-assisted chat interface, receives team/tech stack suggestions and effort estimates, and syncs generated epics/tasks to **GitHub** (Jira replaced — see decisions below).
-
-**Three axes on which this is graded:** system design quality · eval coverage · cost analysis.
+> **Design document overrides:** `capstone_project_design_document.md` is the original submission artifact and has not been updated. Where it conflicts with this file, **this file wins**:
+> - **Embedding model:** Design doc says `Gemini text-embedding-004` — overridden by ADR-004. Use `text-embedding-3-small` (OpenAI, 1536 dims).
+> - **Integration target:** Design doc says Jira via FastMCP — overridden by ADR-001. Use GitHub Issues + Milestones. `tasks.jira_key` → `tasks.github_issue_number`. `/sync-jira` → `/sync`. No Jira code, dependencies, or env vars.
 
 ---
 
-## 2. Architecture
+## Non-Negotiable Rules
 
-### Pattern
-- **Phases 1–3** (ingestion → refinement → tech stack): deterministic pipeline
-- **Phases 4–6** (team suggestion → estimation → epic gen + sync): LangGraph ReAct agent
+1. **Never use `chromadb.Client()`** — always `chromadb.PersistentClient(path=os.environ["CHROMA_PERSIST_PATH"])`
+2. **Never use `MemorySaver`** — always `SqliteSaver` for the LangGraph checkpointer
+3. **Never change `EMBEDDING_DIMENSIONS` after ingestion** — requires full re-embedding of all projects. Embedding model is `text-embedding-3-small` (OpenAI, 1536 dims). The design doc incorrectly specifies `Gemini text-embedding-004` — this is overridden here.
+4. **All API routes prefixed `/api/v1/`**
+5. **Retry logic at LangGraph node level, not FastAPI endpoint level** (exponential backoff, max 3 retries)
+6. **`phase_status` dict must be updated in `ProjectState` at every phase transition**
+7. **Fernet for PII encryption** — key from `PII_ENCRYPTION_KEY` env var
+8. **SQLite WAL mode** — `PRAGMA journal_mode=WAL` on engine init; `check_same_thread=False`
+9. **LLM provider switchable via env var** — never hardcode `google` or `anthropic`
+10. **GitHub MCP only** — no Jira references anywhere in codebase
+11. **Two separate SQLite databases** — `app.db` for application data, `project_state.db` for LangGraph checkpoints
 
-### Phase Summary
+---
+
+## Commands
+
+> Commands below reflect the planned stack. Update with real paths once scaffolding is added.
+
+### Backend
+```bash
+# Install dependencies
+pip install -r requirements.txt
+
+# Run dev server
+uvicorn app.main:app --reload --port 8000
+
+# Run all tests
+pytest
+
+# Run a single test
+pytest tests/path/test_file.py::test_name -v
+
+# Apply migrations
+alembic upgrade head
+
+# Generate a new migration
+alembic revision --autogenerate -m "description"
+
+# Seed database
+curl -X POST http://localhost:8000/api/v1/factory/seed-all
+
+# Generate Fernet PII key (run once, store in .env)
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+### Frontend
+```bash
+# Install dependencies
+npm install
+
+# Run dev server
+npm run dev        # http://localhost:3000
+
+# Type check
+npx tsc --noEmit
+
+# Lint
+npm run lint
+```
+
+### Evals
+```bash
+# Run full eval suite
+python eval_suite.py --threshold 0.90
+
+# Run a single eval
+python -m evals.harness --test-case <id>
+```
+
+---
+
+## Architecture
+
+### What This Is
+
+A PM uploads a requirements document (PDF/DOCX), refines it through an AI-assisted chat, receives team/tech stack suggestions and effort estimates, then syncs generated epics/tasks to GitHub. Graded on: system design quality · eval coverage · cost analysis.
+
+### Processing Pipeline
+
+**Phases 1–3** run as a deterministic pipeline. **Phases 4–6** run as a LangGraph ReAct agent.
 
 | Phase | Name | Key Components |
 |-------|------|----------------|
 | 1 | Document Ingestion | PDF/DOCX parser, structure-aware chunker, `text-embedding-3-small`, ChromaDB |
-| 2 | Chat & Refinement | RAG pipeline, query rewriting (3 sub-queries), BERT reranker (top-20→top-4), TBD detector |
+| 2 | Chat & Refinement | Hybrid RAG (dense ChromaDB + sparse BM25 merged), query rewriting (3 sub-queries), BERT reranker (top-20→top-4), TBD detector, clarification widget, proposal generation |
 | 3 | Tech Stack Suggestion | `approved_technologies` tool, employee skills tool, LLM reasoning |
 | 4 | Team Suggestion | SQLite employee tool, skills matcher, availability filter |
 | 5 | Effort Estimation | Historical projects retrieval, LangGraph state, LLM estimation |
 | 6 | Epic & Task Gen + Sync | Pydantic structured output, GitHub MCP server, sync status tracking |
 
-### LangGraph State Object
+**Phase 2 sub-steps:**
+1. RAG chat loop — PM asks questions; TBDs surfaced via LLM
+2. Clarification widget — PM responds per TBD item with one of: **Answer / TBD / Out-of-Scope**; each response saved to `clarifications` table
+3. Proposal generation — PM clicks "Generate Proposal"; a fresh structured proposal document is created from the refined requirements (not in-place editing of the upload). Stored in `proposals` table; DOCX written to `/documents/`
+
+**API endpoints for Phase 2:**
+```
+POST   /api/v1/projects/{id}/clarifications     # submit TBD answers
+POST   /api/v1/projects/{id}/proposal           # trigger proposal generation
+GET    /api/v1/projects/{id}/proposal           # retrieve generated proposal
+```
+
+### LangGraph State
+
 ```python
 class ProjectState(TypedDict):
     project_id: str
@@ -45,47 +130,83 @@ class ProjectState(TypedDict):
     phase_status: dict         # REQUIRED: {"phase_1": "complete", "phase_2": "in_progress", ...}
 ```
 
----
+Phase transitions are PM-initiated ("Proceed" button). Phase N cannot start until Phase N-1 `phase_status == "complete"`.
 
-## 3. Technology Stack
+### Tech Stack
 
-| Layer | Technology | Notes |
-|-------|-----------|-------|
-| Frontend | Next.js 14+ (App Router) | Tailwind CSS + shadcn/ui |
-| Charts | Recharts | Metrics tab only |
-| Backend | FastAPI + Uvicorn | All routes prefixed `/api/v1/` |
-| ORM / DB | SQLAlchemy + SQLite + Alembic | WAL mode enabled; `check_same_thread=False` |
-| Vector DB | ChromaDB | **PersistentClient only** — see §6 |
-| LLM (main) | Gemini (default, switchable) | Via LangChain factory + `MAIN_LLM_PROVIDER` env var |
-| LLM (fast) | Gemini Flash / Nano | Query rewriting, LLM-as-judge |
-| LLM (structured) | Claude Sonnet (optional) | Estimation + epic generation |
-| Embeddings | `text-embedding-3-small` (OpenAI) | **1536 dims, cosine distance — never change post-ingestion** |
-| Reranking | `cross-encoder/ms-marco-MiniLM-L-6-v2` | Local BERT, ~500MB, sentence-transformers |
-| PII Detection | regex + spaCy `en_core_web_sm` | Two-pass: regex first, then NER |
-| Orchestration | LangGraph | `SqliteSaver` checkpointer (not MemorySaver) |
-| Structured Output | Pydantic | All epics/tasks/team suggestions |
-| Doc Export | python-docx | Proposal DOCX to `/documents` |
-| GitHub Integration | GitHub MCP server | Replaces Jira — see §5 |
-| Observability | LangSmith or Langfuse | Both configured via env; decision pending |
-| Evals | Custom harness + RAGAS + DeepEval | See §8 |
-| Seed Data | Faker (seed=42) | Via Swagger factory endpoints |
+| Layer | Technology |
+|-------|-----------|
+| Frontend | Next.js 14+ App Router, Tailwind CSS, shadcn/ui, Recharts (metrics only) |
+| Backend | FastAPI + Uvicorn |
+| ORM / DB | SQLAlchemy + SQLite + Alembic |
+| Vector DB | ChromaDB `PersistentClient` |
+| LLM (main) | Gemini via `MAIN_LLM_PROVIDER` env var (switchable to Anthropic) |
+| LLM (fast) | Gemini Flash / Nano — query rewriting, LLM-as-judge |
+| LLM (structured) | Claude Sonnet — estimation + epic generation (Phase 5–6) |
+| Embeddings | `text-embedding-3-small`, 1536 dims, cosine distance |
+| Sparse retrieval | BM25 (rank-bm25) — merged with dense results before reranker |
+| Reranker | `cross-encoder/ms-marco-MiniLM-L-6-v2` (local, ~500MB) |
+| PII | regex + spaCy `en_core_web_sm`, two-pass; Fernet encryption |
+| Orchestration | LangGraph + `SqliteSaver` |
+| GitHub sync | GitHub MCP (FastMCP) — replaces Jira |
+| Observability | LangSmith or Langfuse (env-switchable, decision pending) |
+| Seed data | Faker (`seed=42`) |
 
 ---
 
-## 4. Architectural Decisions (Locked)
+## Key Implementation Details
 
-### ADR-001: GitHub replaces Jira
-Jira MCP is replaced with GitHub Issues + Milestones for MVP.
+### ChromaDB Collection Setup
 
-**Mapping:**
-| PRD (Jira) | GitHub Equivalent |
-|------------|-------------------|
-| `create_project` | `POST /repos` |
-| `create_epic` | Milestone (`POST /repos/{owner}/{repo}/milestones`) |
-| `create_story` | Issue with `story` label |
-| `create_task` | Issue with `task` label + milestone reference |
+```python
+client = chromadb.PersistentClient(path=os.environ["CHROMA_PERSIST_PATH"])
+collection = client.get_or_create_collection(
+    name=f"project_{project_id}",
+    metadata={"hnsw:space": "cosine"},
+    embedding_function=OpenAIEmbeddingFunction(
+        api_key=os.environ["OPENAI_API_KEY"],
+        model_name="text-embedding-3-small",
+        dimensions=1536
+    )
+)
+```
 
-**MCP tools (FastMCP):**
+### LangGraph Checkpointer
+
+```python
+from langgraph.checkpoint.sqlite import SqliteSaver
+checkpointer = SqliteSaver.from_conn_string("./project_state.db")
+graph = workflow.compile(checkpointer=checkpointer)
+```
+
+### Full API Surface
+
+All routes prefixed `/api/v1/`. OpenAPI spec auto-generated at `/docs`.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/projects` | Create project |
+| POST | `/projects/{id}/documents` | Upload requirements document |
+| GET | `/projects/{id}/tbds` | Retrieve detected TBD items |
+| POST | `/projects/{id}/clarifications` | Submit TBD clarification answers |
+| POST | `/projects/{id}/proposal` | Trigger proposal generation |
+| GET | `/projects/{id}/proposal` | Retrieve generated proposal |
+| POST | `/projects/{id}/stack` | Run tech stack suggestion |
+| POST | `/projects/{id}/estimate` | Run effort estimation |
+| POST | `/projects/{id}/sync` | Sync epics/tasks to GitHub |
+| GET | `/projects/{id}/metrics` | Retrieve project metrics |
+| POST | `/factory/seed-employees` | Seed employee data |
+| POST | `/factory/seed-projects` | Seed historical projects |
+| POST | `/factory/seed-technologies` | Seed approved technologies |
+| POST | `/factory/seed-all` | Seed all |
+| DELETE | `/factory/reset-db` | Reset database |
+
+---
+
+### GitHub MCP Tools (FastMCP)
+
+Epics → GitHub Milestones. Stories/Tasks → GitHub Issues with labels.
+
 ```python
 @mcp.tool
 def create_github_milestone(repo: str, title: str, description: str, due_date: str) -> dict: ...
@@ -98,174 +219,79 @@ def create_github_issue(repo: str, title: str, body: str, milestone_number: int,
 def get_github_repo_issues(repo: str, milestone: int) -> list[dict]: ...
 ```
 
-**DB schema changes:** `jira_epic_id VARCHAR` → `github_milestone_number INTEGER` + `github_milestone_url VARCHAR`; `jira_issue_id VARCHAR` → `github_issue_number INTEGER` + `github_issue_url VARCHAR`
+DB fields: `epics.github_milestone_number INTEGER`, `epics.github_milestone_url VARCHAR`, `tasks.github_issue_number INTEGER`, `tasks.github_issue_url VARCHAR`. Sync status enum: `pending | synced | skipped | failed`.
 
-**Env vars:** `GITHUB_TOKEN`, `GITHUB_OWNER`, `GITHUB_REPO` (no `JIRA_*` vars)
-**Flag:** `GITHUB_USE_PROJECTS_V2=false` (Projects V2 GraphQL is post-MVP)
+### Hybrid RAG Retrieval (Phase 2)
 
----
+Dense and sparse results are merged before the reranker:
 
-### ADR-002: SqliteSaver replaces MemorySaver
+1. **Dense** — ChromaDB cosine similarity, top-`TOP_K_RETRIEVAL` (default 20)
+2. **Sparse** — BM25 (`rank-bm25`) over the same corpus, top-`TOP_K_RETRIEVAL`
+3. **Merge** — Reciprocal Rank Fusion (RRF) or score normalisation to combine both result sets
+4. **Rerank** — `cross-encoder/ms-marco-MiniLM-L-6-v2` scores the merged set, top-`TOP_N_RERANK` (default 4) passed to LLM
+
+Query rewriting generates 3 sub-queries per user message (env: `QUERY_REWRITE_COUNT=3`); each sub-query runs the full dense+sparse+rerank pipeline, results de-duplicated by chunk ID before the final top-4 selection.
+
+### Chunking
+
+- Size: 50–800 tokens (env: `CHUNK_SIZE_MIN_TOKENS`, `CHUNK_SIZE_MAX_TOKENS`)
+- Strategy: header detection → paragraph fallback → size normalization
+- Tables are atomic chunks — never split mid-row
+- Chunk metadata: `project_id`, `chunk_index`, `detected_type`, `page_number`, `section_hint`
+- Adjacent chunk cosine similarity must be < 0.85
+
+### ChromaDB Abstraction
+
+ChromaDB is the MVP vector store but the architecture treats it as swappable. Isolate all collection access behind a thin adapter so a post-MVP migration to Qdrant or Pinecone requires only an adapter swap:
+
 ```python
-from langgraph.checkpoint.sqlite import SqliteSaver
-checkpointer = SqliteSaver.from_conn_string("./project_state.db")
-graph = workflow.compile(checkpointer=checkpointer)
+class VectorStoreAdapter:
+    def upsert(self, chunks: list[dict]) -> None: ...
+    def query(self, embedding: list[float], top_k: int) -> list[dict]: ...
+
+class ChromaAdapter(VectorStoreAdapter): ...   # MVP implementation
 ```
-Keep `project_state.db` separate from the application `app.db`.
+
+Never call ChromaDB client methods directly from phase nodes — always go through the adapter.
+
+### Caching
+
+| What | Method |
+|------|--------|
+| Document embeddings | Check ChromaDB for `project_id` before re-embedding |
+| Phase LLM outputs | Skip if `phase_status == "complete"` |
+| Employee DB queries | In-memory dict, loaded once per session |
+| Prompts + tool defs | Static content first in prompt (KV cache) |
+
+### PII Detection
+
+Two-pass: regex first (`PII_REGEX_ENABLED`), then spaCy NER (`PII_NER_ENABLED`). Gate controlled by `PII_REVIEW_GATE=true`. TBD detection in Phase 2 covers Level 1 (explicit) and Level 2 (vague) only.
 
 ---
 
-### ADR-003: ChromaDB PersistentClient
-```python
-import chromadb
-client = chromadb.PersistentClient(path="./chroma_db")
-collection = client.get_or_create_collection(
-    name=f"project_{project_id}",
-    metadata={"hnsw:space": "cosine"},
-    embedding_function=OpenAIEmbeddingFunction(
-        api_key=os.environ["OPENAI_API_KEY"],
-        model_name="text-embedding-3-small",
-        dimensions=1536  # NEVER change post-ingestion
-    )
+## Database Schema
+
+Core tables: `projects`, `documents`, `clarifications`, `proposals`, `proposal_state`, `employees`, `skills`, `employee_skills`, `approved_technologies`, `historical_projects`, `epics`, `tasks`, `pii_detections`, `pii_ingestion_logs`, `metrics`, `latency_logs`, `error_logs`
+
+Key table definitions:
+```sql
+documents (
+  id, project_id, filename, upload_ts,
+  anonymized_path, status
+)
+
+clarifications (
+  id, document_id, question, answer,
+  action  -- 'Answer' | 'TBD' | 'Out-of-Scope'
+)
+
+proposals (
+  id, project_id, document_id,
+  content_path, created_at
 )
 ```
-Add `chroma_db/` and `project_state.db` to `.gitignore`.
 
----
-
-### ADR-004: Embedding contract locked
-- Model: `text-embedding-3-small`
-- Dimensions: `1536` (env var: `EMBEDDING_DIMENSIONS=1536`)
-- Distance: `cosine`
-- **Changing dimensions after ingestion requires full re-embedding. Do not do this.**
-
----
-
-### ADR-005: Phase status + retry logic
-Every phase node must update `phase_status` in `ProjectState`. Retry logic (exponential backoff, max 3 retries) lives at the LangGraph node level, not at the FastAPI endpoint level.
-
----
-
-### ADR-006: PII encryption
-Fernet symmetric encryption via `cryptography` library. Key in `.env` as `PII_ENCRYPTION_KEY`.
-```bash
-# Generate key (run once, store in .env):
-python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-```
-
----
-
-### ADR-007: Concurrency model (MVP)
-- Sequential phase transitions within a project
-- No concurrent project processing in MVP
-- SQLite WAL mode: `PRAGMA journal_mode=WAL`
-- Engine: `create_engine("sqlite:///./app.db", connect_args={"check_same_thread": False})`
-
----
-
-### ADR-008: Phase transition rules
-- All transitions are PM-initiated via explicit "Proceed" button
-- Phase N cannot start until Phase N-1 `phase_status` = `"complete"`
-- PM can navigate backward to review but cannot re-run a completed phase without explicit "Re-run Phase" action
-
----
-
-### ADR-009: TBD detection scope (MVP)
-- Level 1 (explicit TBDs) and Level 2 (vague statements via LLM prompt) only
-- Levels 3 (missing sections) and 4 (contradictions) are post-MVP
-
----
-
-### ADR-010: Model usage strategy
-- **Nano model:** basic testing — RAG retrieval, chunking, initial agent loops
-- **Mini model:** evals and agents after basic testing completes
-- Rationale: cost efficiency for iteration and eval runs
-
----
-
-## 5. Environment Variables
-
-```bash
-# LLM
-MAIN_LLM_PROVIDER=google          # or anthropic
-MAIN_LLM_MODEL=gemini-1.5-pro
-FAST_LLM_PROVIDER=google
-FAST_LLM_MODEL=gemini-1.5-flash
-TEMPERATURE=0.2
-
-# APIs
-OPENAI_API_KEY=
-GOOGLE_API_KEY=
-ANTHROPIC_API_KEY=                 # optional, Phase 5+6
-
-# GitHub MCP (replaces Jira)
-GITHUB_TOKEN=
-GITHUB_OWNER=
-GITHUB_REPO=
-GITHUB_USE_PROJECTS_V2=false
-
-# Embeddings
-EMBEDDING_DIMENSIONS=1536
-
-# ChromaDB
-CHROMA_PERSIST_PATH=./chroma_db
-
-# PII
-PII_ENCRYPTION_KEY=               # generate with Fernet
-PII_DETECTION_ENABLED=true
-PII_REGEX_ENABLED=true
-PII_NER_ENABLED=true
-PII_REVIEW_GATE=true
-
-# RAG Pipeline
-CHUNK_SIZE_MAX_TOKENS=800
-CHUNK_SIZE_MIN_TOKENS=50
-TOP_K_RETRIEVAL=20
-TOP_N_RERANK=4
-QUERY_REWRITE_COUNT=3
-
-# Guardrails
-GROUNDEDNESS_THRESHOLD=0.7
-GROUNDEDNESS_CHECK_ENABLED=true
-HALLUCINATION_FLAG_ENABLED=true
-MAX_FILE_SIZE_MB=10
-MIN_EXTRACTABLE_CHARS=100
-ALLOWED_FILE_TYPES=pdf,docx
-PROMPT_INJECTION_DETECTION=true
-
-# Cost guardrail
-MAX_COST_PER_WORKFLOW_USD=0.50
-
-# Observability
-OBSERVABILITY_PROVIDER=langsmith   # or langfuse
-LANGSMITH_API_KEY=
-
-# Seed data
-FAKER_SEED=42
-SEED_EMPLOYEE_COUNT=20
-SEED_PROJECT_COUNT=15
-SEED_TECHNOLOGY_COUNT=22
-
-# Metrics
-METRICS_ENABLED=true
-TOKEN_TRACKING_ENABLED=true
-COST_PER_1K_INPUT_TOKENS=0.0015
-COST_PER_1K_OUTPUT_TOKENS=0.002
-```
-
----
-
-## 6. Database Schema (SQLite)
-
-Core tables: `projects`, `proposal_state`, `employees`, `skills`, `employee_skills`, `approved_technologies`, `historical_projects`, `epics`, `tasks`, `pii_detections`, `pii_ingestion_logs`, `metrics`, `latency_logs`, `error_logs`
-
-**GitHub-specific fields:**
-- `epics`: `github_milestone_number INTEGER`, `github_milestone_url VARCHAR` (not `jira_epic_id`)
-- `tasks`: `github_issue_number INTEGER`, `github_issue_url VARCHAR` (not `jira_issue_id`)
-
-**Sync status enum:** `pending` | `synced` | `skipped` | `failed`
-
-**Seed factory endpoints:**
+Seed factory endpoints (Swagger-accessible):
 ```
 POST /api/v1/factory/seed-employees
 POST /api/v1/factory/seed-projects
@@ -276,55 +302,23 @@ DELETE /api/v1/factory/reset-db
 
 ---
 
-## 7. API Routes
+## Eval Layer
 
-All routes prefixed `/api/v1/`. FastAPI auto-generates OpenAPI spec at `/docs` — treat as source of truth for frontend contract.
-
-Key route groups: `/projects`, `/projects/{id}/phases`, `/projects/{id}/export`, `/factory`
-
-DOCX export: `GET /api/v1/projects/{id}/export/proposal` → `Content-Disposition: attachment`
-
----
-
-## 8. Eval Layer (Week 11 — Active Focus)
-
-### Current status
-Phase 1 Foundation — in progress.
-
-### File structure
+File layout:
 ```
-/test_cases.json              # 10–15 eval tasks (ground truth)
-/evals/graders.py             # code-based + semantic graders
-/evals/harness.py             # HybridRAGAgentEval class + run_all()
-/results/                     # eval_results_<timestamp>.json per run
-eval_suite.py                 # CI gate: python eval_suite.py --threshold 0.90
+test_cases.json          # 10–15 eval tasks with ground truth
+evals/graders.py         # code-based + semantic graders
+evals/harness.py         # HybridRAGAgentEval + EvalResult
+results/                 # eval_results_<timestamp>.json
+eval_suite.py            # CI gate: python eval_suite.py --threshold 0.90
 ```
 
-### Graders to implement
-| Grader | Type | What it checks |
-|--------|------|----------------|
-| Retrieval source match | Code-based | Retrieved chunk IDs match expected |
-| Tool selection accuracy | Code-based | `tool_calls[].name` matches expected |
-| Loop safety | Code-based | `len(tool_calls) <= max_iterations` |
-| Tool argument validity | Code-based | Pydantic-validate each tool call's args |
-| Phase ordering compliance | Code-based | Phase N complete before N+1 starts |
-| Semantic relevance | Semantic | Cosine similarity: retrieved chunks vs query |
-| Groundedness | LLM-as-judge | All claims supported by context? |
-
-### LLM-as-judge prompt template (groundedness)
-```python
-GROUNDEDNESS_JUDGE_PROMPT = """
-System: You are an evaluation judge. Answer only with a JSON object.
-User:
-  Context: {retrieved_chunks}
-  Response: {llm_response}
-  Question: Is every factual claim in the Response directly supported by the Context?
-  Score 0-1 where 1 = fully grounded, 0 = contains unsupported claims.
-  Output: {"score": float, "reasoning": str, "unsupported_claims": list[str]}
-"""
+Eval results are synced to Google Drive after each run via rclone:
+```bash
+rclone copy results/ gdrive:acuity/eval-results/
 ```
+Configure the remote once with `rclone config`; add the sync call at the end of `eval_suite.py`.
 
-### HybridRAGAgentEval harness
 ```python
 @dataclass
 class EvalResult:
@@ -340,57 +334,45 @@ class HybridRAGAgentEval:
     def run_all(self) -> dict: ...
 ```
 
-### Eval metrics
-- **Development:** `pass@k` (at least 1 success in k trials)
-- **Production:** `pass^k` (all k trials succeed)
-- **Primary metric:** `pass@1`
-- **Baseline target:** ~40% pass rate before any tuning
-- **CI gate threshold:** 90%
+Graders, their implementation library, and per-test pass thresholds:
 
-### Baseline protocol
-On Day 7 morning, before any prompt tuning, run all evals and save as `results/baseline_eval_run_001.json`. All subsequent runs compare against this.
+| Grader | Library | Threshold |
+|--------|---------|-----------|
+| Retrieval source match | RAGAS (`context_recall`) | ≥ 0.80 |
+| Answer relevancy | RAGAS (`answer_relevancy`) | ≥ 0.75 |
+| Reranker precision improvement | Custom (rank comparison) | ≥ 70% of cases |
+| TBD detection — explicit | Custom (exact match) | 100% |
+| TBD detection — vague | Custom (LLM-as-judge prompt) | ≥ 0.70 |
+| TBD detection — missing sections | Custom (section checklist) | ≥ 0.85 |
+| Tool selection accuracy | Custom (`tool_calls[].name` match) | — |
+| Loop safety | Custom (`len(tool_calls) <= max_iterations`) | — |
+| Tool argument validity | Custom (Pydantic validate) | — |
+| Phase ordering compliance | Custom (phase N−1 complete before N) | — |
+| Proposal completeness | DeepEval (G-Eval rubric) | ≥ 0.75 |
+| Tech stack rationale quality | DeepEval (G-Eval rubric) | ≥ 0.70 |
+| Effort estimate plausibility | Custom (range check vs. historical) | ≥ 0.80 |
+| GitHub ticket structure validity | Custom (schema check) | 100% |
+| Round-trip sync (doc → GitHub) | Custom (end-to-end) | ≥ 0.90 |
+| Groundedness | Custom (LLM-as-judge prompt) | ≥ 0.70 (env: `GROUNDEDNESS_THRESHOLD`) |
 
-### Regression suite rule
-Any eval with `pass_rate > 0.80` is graduated to the regression suite. Mark in code:
+Metrics: primary is `pass@1`. Dev uses `pass@k`, production uses `pass^k`. CI gate threshold: 90%. Any eval with `pass_rate > 0.80` graduates to regression suite — mark with `# REGRESSION: do not change this prompt without re-running evals/regression_suite.py`.
+
+LLM-as-judge groundedness prompt:
 ```python
-# REGRESSION: do not change this prompt without re-running evals/regression_suite.py
+GROUNDEDNESS_JUDGE_PROMPT = """
+System: You are an evaluation judge. Answer only with a JSON object.
+User:
+  Context: {retrieved_chunks}
+  Response: {llm_response}
+  Question: Is every factual claim in the Response directly supported by the Context?
+  Score 0-1 where 1 = fully grounded, 0 = contains unsupported claims.
+  Output: {"score": float, "reasoning": str, "unsupported_claims": list[str]}
+"""
 ```
 
-### Cost estimate (one full workflow)
-| Phase | Model | Est. Tokens | Est. Cost |
-|-------|-------|-------------|-----------|
-| Phase 1 (embedding) | text-embedding-3-small | ~50K | ~$0.005 |
-| Phase 2 (RAG chat, 5 turns) | Gemini 1.5 Pro | ~30K | ~$0.11 |
-| Phase 3–4 (tool calls) | Gemini 1.5 Flash | ~10K | ~$0.01 |
-| Phase 5–6 (estimation + epics) | Claude Sonnet | ~20K | ~$0.06 |
-| **Total** | | ~110K | **~$0.19** |
-
 ---
 
-## 9. Chunking Rules
-
-- Size: 50–800 tokens (configurable)
-- Strategy: structure-aware hybrid — header detection → paragraph fallback → size normalization
-- Tables: atomic chunks, never split mid-row
-- Every chunk gets metadata: `project_id`, `chunk_index`, `detected_type`, `page_number`, `section_hint`
-- Healthy size distribution: Pareto-shaped (P90 < 600 tokens, P10 > 50 tokens)
-- Adjacent chunk cosine similarity threshold: < 0.85 (higher = over-splitting)
-
----
-
-## 10. Caching Strategy
-
-| What | Cached? | Method |
-|------|---------|--------|
-| Document embeddings | Yes | Check ChromaDB for `project_id` before re-embedding |
-| Phase LLM outputs | Yes | `phase_status` field in SQLite — skip if `"complete"` |
-| Employee DB queries | Yes | In-memory Python dict loaded once per session |
-| Prompt + tool definitions | Yes | Static content first in prompt (KV cache) |
-| GitHub API calls | No | Write-only |
-
----
-
-## 11. UI Screens
+## UI Routes
 
 | Screen | Route |
 |--------|-------|
@@ -404,68 +386,96 @@ Any eval with `pass_rate > 0.80` is graduated to the regression suite. Mark in c
 | Epic & Task Review | `/projects/[id]/epics` |
 | Metrics | `/projects/[id]/metrics` |
 
-**Metrics tabs (5):** Token Usage & Cost · AI Quality · Retrieval · Error Handling · Latency
+Metrics page has 5 tabs:
+
+| Tab | Content |
+|-----|---------|
+| Token Usage & Cost | Token count and USD cost per LLM call and per session |
+| AI Quality | Eval pass rates for proposal completeness (DeepEval scores) |
+| Retrieval | Retrieval precision/recall; TBD detection precision/recall across clarification rounds |
+| Error Handling | Error rates, retry counts per phase, failed GitHub sync attempts |
+| Latency | P50/P95 latency per LangGraph agent node |
+
+GitHub Sync stats (tickets created, sync success/failure rate) surface in the Error Handling tab.
 
 ---
 
-## 12. Week 11 Checklist (Current Sprint)
+## Environment Variables
 
-- [ ] Extract 10–15 test cases from real MVP manual tests + edge cases → `test_cases.json`
-- [ ] Write unambiguous success criteria for each test case
-- [ ] Implement code-based graders (retrieval source match, tool selection, loop safety, phase ordering)
-- [ ] Implement semantic grader (cosine similarity: retrieved chunks vs query)
-- [ ] Implement LLM-as-judge grader (groundedness)
-- [ ] Build `HybridRAGAgentEval` harness with `run_eval()` + `EvalResult` dataclass
-- [ ] Run baseline (3 trials per test case); target ~40% pass rate
-- [ ] Read 20+ failed transcripts; document findings
-- [ ] Add CI gate: `python eval_suite.py --threshold 0.90`
+Copy this to `.env` and fill in values:
+
+```bash
+# LLM
+MAIN_LLM_PROVIDER=google
+MAIN_LLM_MODEL=gemini-1.5-pro
+FAST_LLM_PROVIDER=google
+FAST_LLM_MODEL=gemini-1.5-flash
+TEMPERATURE=0.2
+
+# APIs
+OPENAI_API_KEY=
+GOOGLE_API_KEY=
+ANTHROPIC_API_KEY=
+
+# GitHub
+GITHUB_TOKEN=
+GITHUB_OWNER=
+GITHUB_REPO=
+GITHUB_USE_PROJECTS_V2=false
+
+# Embeddings + ChromaDB
+EMBEDDING_DIMENSIONS=1536
+CHROMA_PERSIST_PATH=./chroma_db
+
+# PII
+PII_ENCRYPTION_KEY=
+PII_DETECTION_ENABLED=true
+PII_REGEX_ENABLED=true
+PII_NER_ENABLED=true
+PII_REVIEW_GATE=true
+
+# RAG
+CHUNK_SIZE_MAX_TOKENS=800
+CHUNK_SIZE_MIN_TOKENS=50
+TOP_K_RETRIEVAL=20
+TOP_N_RERANK=4
+QUERY_REWRITE_COUNT=3
+
+# Guardrails
+GROUNDEDNESS_THRESHOLD=0.7
+GROUNDEDNESS_CHECK_ENABLED=true
+HALLUCINATION_FLAG_ENABLED=true
+MAX_FILE_SIZE_MB=10
+MIN_EXTRACTABLE_CHARS=100
+ALLOWED_FILE_TYPES=pdf,docx
+PROMPT_INJECTION_DETECTION=true
+MAX_COST_PER_WORKFLOW_USD=0.50
+
+# Observability
+OBSERVABILITY_PROVIDER=langsmith
+LANGSMITH_API_KEY=
+
+# Seed data
+FAKER_SEED=42
+SEED_EMPLOYEE_COUNT=20
+SEED_PROJECT_COUNT=15
+SEED_TECHNOLOGY_COUNT=22
+
+# Metrics
+METRICS_ENABLED=true
+TOKEN_TRACKING_ENABLED=true
+COST_PER_1K_INPUT_TOKENS=0.0015
+COST_PER_1K_OUTPUT_TOKENS=0.002
+```
+
+Add to `.gitignore`: `.env`, `chroma_db/`, `project_state.db`, `app.db`, `documents/`
 
 ---
 
-## 13. Known Gaps (from PRD Gap Analysis)
-
-All critical gaps are resolved in the decisions above. Remaining open items:
+## Open Decisions
 
 | Item | Status |
 |------|--------|
-| Observability provider (LangSmith vs Langfuse) | Open — both configured via env |
-| Google Drive source documents folder | Not yet recorded — ask Krishna |
-| TBD detection levels 3 & 4 | Post-MVP |
-| Projects V2 GraphQL for GitHub | Post-MVP (`GITHUB_USE_PROJECTS_V2=false`) |
-| Multi-agent orchestration | Post-MVP |
-| AWS S3 migration | Post-MVP (Google Drive → rclone for MVP) |
+| Observability provider | Both LangSmith and Langfuse configured via env — decision pending |
+| Google Drive source documents folder path | Not yet recorded — ask Krishna |
 | DOCX export versioning (v1, v2) | Not yet specified |
-| API versioning contract for frontend | Use `/api/v1/` prefix; generate OpenAPI spec at `/docs` |
-
----
-
-## 14. Post-MVP Backlog
-
-- Fine-tuning: TBD detection model on Qwen 2.5 1.5B (Unsloth)
-- Langfuse migration (better UI, self-hosting)
-- CSV bulk import for employee seed data
-- GitHub sync rollback on complete failure
-- Multi-user support with RBAC
-- Cloud deployment (Railway, Render, or AWS)
-- Linear MCP as alternative to GitHub
-- AWS S3 to replace Google Drive (folder structure transfers directly; rclone command swap only)
-- Multi-agent orchestration
-
----
-
-## 15. Non-Negotiable Rules for Claude Code
-
-1. **Never use `chromadb.Client()`** — always `chromadb.PersistentClient(path=os.environ["CHROMA_PERSIST_PATH"])`
-2. **Never use `MemorySaver`** — always `SqliteSaver` for the LangGraph checkpointer
-3. **Never change `EMBEDDING_DIMENSIONS` after ingestion** — requires full re-embedding
-4. **All routes prefixed `/api/v1/`**
-5. **Retry logic at LangGraph node level, not FastAPI endpoint level**
-6. **`phase_status` dict must be updated in `ProjectState` at every phase transition**
-7. **Fernet for PII encryption** — key from `PII_ENCRYPTION_KEY` env var
-8. **SQLite WAL mode** — `PRAGMA journal_mode=WAL` on engine init
-9. **LLM provider switchable via env var** — never hardcode `google` or `anthropic`
-10. **GitHub MCP only** — no Jira references anywhere in codebase
-
----
-
-*Generated June 2026 
