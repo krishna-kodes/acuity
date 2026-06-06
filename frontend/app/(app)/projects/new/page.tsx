@@ -2,7 +2,9 @@
 
 import { useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
+import { createProject, uploadDocument } from "@/lib/api";
 
 const ACCEPTED_TYPES = [
   "application/pdf",
@@ -140,12 +142,13 @@ function Dropzone({ file, error, onFile }: DropzoneProps) {
 
 export default function NewProjectPage() {
   const router = useRouter();
-  const [name, setName]         = useState("");
-  const [domain, setDomain]     = useState("");
-  const [file, setFile]         = useState<File | null>(null);
+  const queryClient = useQueryClient();
+  const [name, setName]           = useState("");
+  const [domain, setDomain]       = useState("");
+  const [file, setFile]           = useState<File | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
-  const [status, setStatus]     = useState<UploadStatus>("idle");
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [status, setStatus]       = useState<UploadStatus>("idle");
+  const [errorMsg, setErrorMsg]   = useState<string | null>(null);
 
   const handleFile = (f: File | null) => {
     setFile(f);
@@ -161,14 +164,18 @@ export default function NewProjectPage() {
     setErrorMsg(null);
 
     try {
-      // TODO (Epic 4): POST /api/v1/projects → { id } then POST /api/v1/projects/{id}/documents
-      // Simulated upload delay until API is wired
-      await new Promise((res) => setTimeout(res, 1500));
+      const { data: project, error: projErr } = await createProject(name.trim(), domain.trim() || undefined);
+      if (projErr || !project) throw new Error(String(projErr ?? "Failed to create project"));
+
+      const { error: docErr } = await uploadDocument(project.id, file!);
+      if (docErr) throw new Error(String(docErr));
+
+      queryClient.invalidateQueries({ queryKey: ["projects"] });
       setStatus("success");
-      setTimeout(() => router.push("/"), 800);
-    } catch {
+      setTimeout(() => router.push(`/projects/${project.id}/redaction`), 800);
+    } catch (err) {
       setStatus("error");
-      setErrorMsg("Upload failed. Please try again.");
+      setErrorMsg(err instanceof Error ? err.message : "Upload failed. Please try again.");
     }
   };
 

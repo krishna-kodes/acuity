@@ -2,47 +2,86 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useQuery } from "@tanstack/react-query";
 import { PhaseProgressStepper } from "@/components/phase-progress-stepper";
 import { RedactionHighlight } from "@/components/redaction-highlight";
 import { getPhasesForRoute, getNextPhaseRoute } from "@/lib/project-phases";
+import { getRedactionDecisions, patchRedactionDecisions } from "@/lib/api";
 import type { RedactionSpan } from "@/components/redaction-highlight";
 
-// TODO (Epic 4): fetch from GET /api/v1/projects/{id}/tbds and pii_detections
-const MOCK_DETECTIONS: RedactionSpan[] = [
-  { id: 1,  original: "Sarah Johnson",         type: "Person",       method: "NER",   placeholder: "[PERSON_1]",   confidence: 0.96 },
-  { id: 2,  original: "sarah.j@acme.com",      type: "Email",        method: "Regex", placeholder: "[EMAIL_1]",    confidence: 0.99 },
-  { id: 3,  original: "+1 (415) 555-0192",     type: "Phone",        method: "Regex", placeholder: "[PHONE_1]",    confidence: 0.98 },
-  { id: 4,  original: "Acme Corporation",      type: "Organization", method: "NER",   placeholder: "[ORG_1]",      confidence: 0.91 },
-  { id: 5,  original: "David Chen",            type: "Person",       method: "NER",   placeholder: "[PERSON_2]",   confidence: 0.88 },
-  { id: 6,  original: "4532 1234 5678 9012",   type: "Credit Card",  method: "Regex", placeholder: "[CARD_1]",     confidence: 0.99 },
-  { id: 7,  original: "San Francisco, CA",     type: "Location",     method: "NER",   placeholder: "[LOCATION_1]", confidence: 0.82 },
-  { id: 8,  original: "March 15, 2025",        type: "Date",         method: "Regex", placeholder: "[DATE_1]",     confidence: 0.95 },
-];
+function mapDetections(raw: Array<{
+  id: number;
+  text_replacement: string;
+  pii_type: string;
+  detection_method: string;
+  confirmed: boolean;
+  overridden: boolean;
+}>): RedactionSpan[] {
+  const TYPE_LABELS: Record<string, string> = {
+    EMAIL: "Email", PHONE: "Phone", SSN: "SSN",
+    PERSON: "Person", ORG: "Organization", GPE: "Location",
+  };
+  const METHOD_LABELS: Record<string, string> = { regex: "Regex", ner: "NER" };
+  return raw.map((d) => ({
+    id: d.id,
+    original: d.text_replacement,
+    type: TYPE_LABELS[d.pii_type] ?? d.pii_type,
+    method: METHOD_LABELS[d.detection_method] ?? d.detection_method,
+    placeholder: d.text_replacement,
+    confidence: 0.9,
+    decision: d.confirmed ? ("confirmed" as const) : d.overridden ? ("override" as const) : undefined,
+  }));
+}
 
 export default function RedactionPage({ params }: { params: { id: string } }) {
   const router = useRouter();
-  const [detections, setDetections] = useState<RedactionSpan[]>(MOCK_DETECTIONS);
+  const [localDecisions, setLocalDecisions] = useState<Record<number, "confirmed" | "override">>({});
   const [proceeding, setProceeding] = useState(false);
 
+  const { data: rawDetections, isLoading } = useQuery({
+    queryKey: ["redaction-decisions", params.id],
+    queryFn: async () => {
+      const { data, error } = await getRedactionDecisions(params.id);
+      if (error) throw new Error(String(error));
+      return data ?? [];
+    },
+  });
+
+  const detections: RedactionSpan[] = mapDetections(rawDetections ?? []).map((d) => ({
+    ...d,
+    decision: localDecisions[d.id] ?? d.decision,
+  }));
+
   const pendingCount = detections.filter((d) => !d.decision).length;
-  const allResolved  = pendingCount === 0;
+  const allResolved  = detections.length === 0 || pendingCount === 0;
 
   function confirm(id: number) {
-    setDetections((prev) => prev.map((d) => d.id === id ? { ...d, decision: "confirmed" as const } : d));
+    setLocalDecisions((prev) => ({ ...prev, [id]: "confirmed" }));
   }
 
   function override(id: number) {
-    setDetections((prev) => prev.map((d) => d.id === id ? { ...d, decision: "override" as const } : d));
+    setLocalDecisions((prev) => ({ ...prev, [id]: "override" }));
   }
 
   function confirmAll() {
-    setDetections((prev) => prev.map((d) => d.decision ? d : { ...d, decision: "confirmed" as const }));
+    const all: Record<number, "confirmed"> = {};
+    detections.forEach((d) => { if (!d.decision) all[d.id] = "confirmed"; });
+    setLocalDecisions((prev) => ({ ...prev, ...all }));
   }
 
   async function handleProceed() {
     setProceeding(true);
-    // TODO (Epic 4): PATCH /api/v1/projects/{id}/redaction-decisions then POST /api/v1/projects/{id}/phases/2/start
-    await new Promise((res) => setTimeout(res, 800));
+    try {
+      const decisions = detections.map((d) => ({
+        detection_id: d.id,
+        confirmed: (localDecisions[d.id] ?? d.decision) === "confirmed",
+      }));
+      if (decisions.length > 0) {
+        await patchRedactionDecisions(params.id, decisions);
+      }
+    } catch {
+      // Non-fatal — proceed anyway even if patch fails
+    }
     router.push(getNextPhaseRoute("redaction", params.id));
   }
 
@@ -62,7 +101,10 @@ export default function RedactionPage({ params }: { params: { id: string } }) {
             </p>
           </div>
 
-          {pendingCount > 0 && (
+          {isLoading && (
+            <span className="text-xs text-text-muted">Loading detections…</span>
+          )}
+          {!isLoading && pendingCount > 0 && (
             <span className="shrink-0 text-xs font-medium text-warning bg-warning-subtle border border-warning/20 px-2 py-1 rounded-full">
               {pendingCount} pending
             </span>

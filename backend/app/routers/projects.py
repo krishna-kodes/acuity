@@ -51,18 +51,42 @@ def _get_project_or_404(project_id: str, db: Session) -> Project:
     return project
 
 
+@router.get("/projects", response_model=list[ProjectResponse])
+def list_projects(
+    db: Session = Depends(get_db),
+) -> list[ProjectResponse]:
+    projects = db.query(Project).order_by(Project.created_at.desc()).all()
+    return [
+        ProjectResponse(
+            id=str(p.id),
+            name=p.name,
+            domain=p.domain,
+            status=p.status.value,
+            current_phase=phase_to_int(p.phase.value),
+            created_at=p.created_at.isoformat(),
+        )
+        for p in projects
+    ]
+
+
 @router.post("/projects", response_model=ProjectResponse, status_code=201)
 def create_project(
     body: ProjectCreate,
     db: Session = Depends(get_db),
 ) -> ProjectResponse:
-    project = Project(name=body.name, status=ProjectStatus.draft, phase=ProjectPhase.redaction)
+    project = Project(
+        name=body.name,
+        domain=body.domain,
+        status=ProjectStatus.draft,
+        phase=ProjectPhase.redaction,
+    )
     db.add(project)
     db.commit()
     db.refresh(project)
     return ProjectResponse(
         id=str(project.id),
         name=project.name,
+        domain=project.domain,
         status=project.status.value,
         current_phase=phase_to_int(project.phase.value),
         created_at=project.created_at.isoformat(),
