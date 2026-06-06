@@ -26,7 +26,9 @@ def test_create_all_tables(tmp_engine):
     Base.metadata.create_all(tmp_engine)
     inspector = inspect(tmp_engine)
     tables = set(inspector.get_table_names())
-    assert EXPECTED_TABLES == tables, f"Missing: {EXPECTED_TABLES - tables}, Extra: {tables - EXPECTED_TABLES}"
+    missing = EXPECTED_TABLES - tables
+    extra = tables - EXPECTED_TABLES
+    assert EXPECTED_TABLES == tables, f"Missing: {missing}, Extra: {extra}"
 
 
 def test_all_tables_have_id_pk(tmp_engine):
