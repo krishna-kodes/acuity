@@ -64,3 +64,96 @@ async def test_parse_docx_extracts_text(tmp_path):
 
     assert result.filename == "test.docx"
     assert "OAuth" in result.pages[0].text
+
+
+# ── Chunker tests ────────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_chunk_detects_numbered_header():
+    """Lines matching '2.3 Title' are classified as headers."""
+    from app.services.chunker import chunk_document
+    from app.services.ingestion import PageContent, ParsedDocument
+
+    parsed = ParsedDocument(
+        filename="req.pdf",
+        pages=[PageContent(
+            page_number=1,
+            text="2.3 Authentication Requirements\nThe system shall support OAuth 2.0.",
+            tables=[],
+        )],
+    )
+    chunks = await chunk_document(parsed, "proj_1")
+    types = [c.detected_type for c in chunks]
+    assert "header" in types
+
+
+@pytest.mark.asyncio
+async def test_chunk_detects_list_items():
+    """Lines starting with '- ' or '* ' are classified as list_items."""
+    from app.services.chunker import chunk_document
+    from app.services.ingestion import PageContent, ParsedDocument
+
+    parsed = ParsedDocument(
+        filename="req.pdf",
+        pages=[PageContent(
+            page_number=1,
+            text="- The system shall support OAuth 2.0\n- Response time < 200ms\n* Must handle 1000 concurrent users",
+            tables=[],
+        )],
+    )
+    chunks = await chunk_document(parsed, "proj_1")
+    types = [c.detected_type for c in chunks]
+    assert "list_item" in types
+
+
+@pytest.mark.asyncio
+async def test_chunk_table_is_atomic():
+    """A table always produces exactly one chunk regardless of size."""
+    from app.services.chunker import chunk_document
+    from app.services.ingestion import PageContent, ParsedDocument
+
+    big_table = [["Col A", "Col B"]] + [["val", "val"] for _ in range(100)]
+    parsed = ParsedDocument(
+        filename="req.pdf",
+        pages=[PageContent(page_number=1, text="", tables=[big_table])],
+    )
+    chunks = await chunk_document(parsed, "proj_1")
+    table_chunks = [c for c in chunks if c.detected_type == "table"]
+    assert len(table_chunks) == 1
+
+
+@pytest.mark.asyncio
+async def test_chunk_token_bounds():
+    """All non-table chunks are within [min_tokens, max_tokens]."""
+    from app.services.chunker import chunk_document
+    from app.services.ingestion import PageContent, ParsedDocument
+
+    long_text = " ".join(["The system shall handle requests efficiently."] * 50)
+    parsed = ParsedDocument(
+        filename="req.pdf",
+        pages=[PageContent(page_number=1, text=long_text, tables=[])],
+    )
+    chunks = await chunk_document(parsed, "proj_1", min_tokens=50, max_tokens=200)
+    for chunk in chunks:
+        if chunk.detected_type != "table":
+            assert chunk.token_count >= 50, f"Chunk too small: {chunk.token_count}"
+            assert chunk.token_count <= 200, f"Chunk too large: {chunk.token_count}"
+
+
+@pytest.mark.asyncio
+async def test_chunk_section_hint_propagates():
+    """section_hint on non-header chunks equals the most recent header text."""
+    from app.services.chunker import chunk_document
+    from app.services.ingestion import PageContent, ParsedDocument
+
+    parsed = ParsedDocument(
+        filename="req.pdf",
+        pages=[PageContent(
+            page_number=1,
+            text="2. Functional Requirements\n\nThe system shall support OAuth 2.0.\n\nThe system shall log all actions.",
+            tables=[],
+        )],
+    )
+    chunks = await chunk_document(parsed, "proj_1")
+    non_headers = [c for c in chunks if c.detected_type != "header"]
+    assert all(c.section_hint == "2. Functional Requirements" for c in non_headers)
