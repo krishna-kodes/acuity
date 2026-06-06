@@ -3,3 +3,4 @@ uvicorn[standard]==0.30.0
 sqlalchemy==2.0.30
 pydantic-settings==2.2.1
 python-multipart==0.0.9
+alembic==1.13.1
