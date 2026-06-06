@@ -1,9 +1,12 @@
-from fastapi import APIRouter, BackgroundTasks, Depends, File, UploadFile
+import os
+
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models.enums import DocumentStatus
-from app.models.project import Document
+from app.models.enums import DocumentStatus, ProjectPhase, ProjectStatus, TBDStatus, TBDAction
+from app.models.project import Document, Project, Proposal
 from app.schemas.clarification import ClarificationCreate, ClarificationResponse
 from app.schemas.document import (
     DocumentResponse,
@@ -18,6 +21,7 @@ from app.schemas.project import (
     ProjectResponse,
     TBDItem,
     TechStackResponse,
+    phase_to_int,
 )
 from app.schemas.proposal import ProposalResponse
 from app.schemas.sync import SyncResponse
@@ -25,19 +29,43 @@ from app.services.ingestion import ingest_document
 
 router = APIRouter(tags=["projects"])
 
+# Phases that mean phase 2 (chat) is complete
+_POST_CHAT_PHASES = {
+    ProjectPhase.techstack, ProjectPhase.team, ProjectPhase.estimation,
+    ProjectPhase.epics, ProjectPhase.complete,
+}
+# Phases that mean phase 4 (team) is complete
+_POST_TEAM_PHASES = {
+    ProjectPhase.estimation, ProjectPhase.epics, ProjectPhase.complete,
+}
+
+
+def _get_project_or_404(project_id: str, db: Session) -> Project:
+    try:
+        pid = int(project_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Project not found")
+    project = db.query(Project).filter(Project.id == pid).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return project
+
 
 @router.post("/projects", response_model=ProjectResponse, status_code=201)
 def create_project(
     body: ProjectCreate,
     db: Session = Depends(get_db),
 ) -> ProjectResponse:
-    # TODO(Epic 5 #35): persist to DB
+    project = Project(name=body.name, status=ProjectStatus.draft, phase=ProjectPhase.redaction)
+    db.add(project)
+    db.commit()
+    db.refresh(project)
     return ProjectResponse(
-        id="stub-id",
-        name=body.name,
-        status="draft",
-        current_phase=1,
-        created_at="2026-01-01T00:00:00Z",
+        id=str(project.id),
+        name=project.name,
+        status=project.status.value,
+        current_phase=phase_to_int(project.phase.value),
+        created_at=project.created_at.isoformat(),
     )
 
 
@@ -53,7 +81,6 @@ async def upload_document(
     background_tasks: BackgroundTasks = BackgroundTasks(),
     db: Session = Depends(get_db),
 ) -> DocumentResponse:
-    import os
     os.makedirs("documents", exist_ok=True)
     file_path = f"documents/{project_id}_{file.filename}"
     content = await file.read()
@@ -146,7 +173,6 @@ def apply_redaction_decisions(
 
     db.commit()
 
-    # Find the document for this project and queue ingestion completion
     doc = (
         db.query(Document)
         .filter(
@@ -169,8 +195,33 @@ def get_tbds(
     project_id: str,
     db: Session = Depends(get_db),
 ) -> list[TBDItem]:
-    # TODO(Epic 5 #37): retrieve TBDs from LangGraph state
-    return []
+    from app.models.clarification import Clarification
+    from app.models.enums import TBDLevel
+
+    try:
+        pid = int(project_id)
+    except ValueError:
+        return []
+
+    _tbd_level_int = {
+        TBDLevel.explicit: 1, TBDLevel.vague: 2,
+        TBDLevel.missing_section: 3, TBDLevel.contradiction: 4,
+    }
+
+    tbds = (
+        db.query(Clarification)
+        .filter(Clarification.project_id == pid, Clarification.status == TBDStatus.open)
+        .all()
+    )
+    return [
+        TBDItem(
+            id=str(t.id),
+            question=t.title,
+            level=_tbd_level_int.get(t.level, 1),
+            resolved=False,
+        )
+        for t in tbds
+    ]
 
 
 @router.post(
@@ -183,9 +234,54 @@ def create_clarification(
     body: ClarificationCreate,
     db: Session = Depends(get_db),
 ) -> ClarificationResponse:
-    # TODO(Epic 5 #40): persist clarification
+    from app.models.clarification import Clarification
+    from app.models.enums import TBDLevel
+
+    _action_to_status = {
+        "Answer": TBDStatus.answered,
+        "TBD": TBDStatus.tbd,
+        "Out-of-Scope": TBDStatus.oos,
+    }
+
+    # Try to update an existing clarification
+    det = None
+    try:
+        det = db.query(Clarification).filter(Clarification.id == int(body.tbd_id)).first()
+    except (ValueError, TypeError):
+        pass
+
+    if det:
+        try:
+            det.action = TBDAction(body.action)
+        except ValueError:
+            det.action = None
+        det.answer = body.answer
+        det.status = _action_to_status.get(body.action, TBDStatus.answered)
+        db.commit()
+    else:
+        try:
+            pid = int(project_id)
+        except ValueError:
+            pid = 0
+        try:
+            action = TBDAction(body.action)
+        except ValueError:
+            action = None
+        det = Clarification(
+            project_id=pid,
+            title=f"TBD-{body.tbd_id}",
+            description=body.answer or "",
+            level=TBDLevel.explicit,
+            status=_action_to_status.get(body.action, TBDStatus.answered),
+            action=action,
+            answer=body.answer,
+        )
+        db.add(det)
+        db.commit()
+        db.refresh(det)
+
     return ClarificationResponse(
-        id="stub-clarification-id",
+        id=str(det.id),
         tbd_id=body.tbd_id,
         action=body.action,
         answer=body.answer,
@@ -197,12 +293,31 @@ def generate_proposal(
     project_id: str,
     db: Session = Depends(get_db),
 ) -> ProposalResponse:
-    # TODO(Epic 5 #37): trigger LangGraph proposal generation node
+    from app.services.exporter import generate_proposal_docx
+
+    project = _get_project_or_404(project_id, db)
+
+    doc = db.query(Document).filter(Document.project_id == project.id).first()
+    content = f"Requirements proposal for: {project.name}"
+    if doc:
+        content += f"\n\nSource document: {doc.filename}"
+
+    content_path = generate_proposal_docx(project.id, project.name, content)
+
+    proposal = Proposal(
+        project_id=project.id,
+        document_id=doc.id if doc else 0,
+        content_path=content_path,
+    )
+    db.add(proposal)
+    db.commit()
+    db.refresh(proposal)
+
     return ProposalResponse(
-        id="stub-proposal-id",
+        id=str(proposal.id),
         project_id=project_id,
-        content_path="documents/stub-proposal.docx",
-        created_at="2026-01-01T00:00:00Z",
+        content_path=proposal.content_path,
+        created_at=proposal.created_at.isoformat(),
     )
 
 
@@ -211,40 +326,115 @@ def get_proposal(
     project_id: str,
     db: Session = Depends(get_db),
 ) -> ProposalResponse:
-    # TODO(Epic 5 #40): retrieve from proposals table
+    project = _get_project_or_404(project_id, db)
+
+    proposal = (
+        db.query(Proposal)
+        .filter(Proposal.project_id == project.id)
+        .order_by(Proposal.created_at.desc())
+        .first()
+    )
+    if not proposal:
+        raise HTTPException(status_code=404, detail="No proposal found for this project")
+
     return ProposalResponse(
-        id="stub-proposal-id",
+        id=str(proposal.id),
         project_id=project_id,
-        content_path="documents/stub-proposal.docx",
-        created_at="2026-01-01T00:00:00Z",
+        content_path=proposal.content_path,
+        created_at=proposal.created_at.isoformat(),
+    )
+
+
+@router.get("/projects/{project_id}/export/proposal")
+def export_proposal(
+    project_id: str,
+    db: Session = Depends(get_db),
+):
+    """Download the generated proposal as a DOCX file."""
+    project = _get_project_or_404(project_id, db)
+
+    proposal = (
+        db.query(Proposal)
+        .filter(Proposal.project_id == project.id)
+        .order_by(Proposal.created_at.desc())
+        .first()
+    )
+    if not proposal:
+        raise HTTPException(status_code=404, detail="No proposal found for this project")
+
+    if not os.path.exists(proposal.content_path):
+        raise HTTPException(status_code=404, detail="Proposal file not found on disk")
+
+    return FileResponse(
+        proposal.content_path,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": f"attachment; filename=proposal_{project_id}.docx"},
     )
 
 
 @router.post("/projects/{project_id}/stack", response_model=TechStackResponse)
-def suggest_stack(
+async def suggest_stack(
     project_id: str,
     db: Session = Depends(get_db),
 ) -> TechStackResponse:
-    # TODO(E5-T6): load LangGraph state, enforce phase guard, invoke run_phase()
+    project = _get_project_or_404(project_id, db)
+
+    if project.phase not in _POST_CHAT_PHASES:
+        raise HTTPException(
+            status_code=409,
+            detail="Phase 2 (chat & refinement) must be complete before running tech stack suggestion",
+        )
+
+    tech_stack: dict = {}
+    try:
+        from app.services.workflow import run_phase
+        state = await run_phase(str(project.id))
+        tech_stack = state.get("tech_stack") or {}
+    except Exception:
+        pass
+
+    if project.phase == ProjectPhase.chat:
+        project.phase = ProjectPhase.techstack
+        db.commit()
+
     return TechStackResponse(
-        frontend=["Next.js"],
-        backend=["FastAPI"],
-        database=["SQLite"],
-        infra=["Railway"],
-        rationale="Stub rationale — populated by LangGraph in E5-T6.",
+        frontend=tech_stack.get("frontend", ["Next.js"]),
+        backend=tech_stack.get("backend", ["FastAPI"]),
+        database=tech_stack.get("database", ["SQLite"]),
+        infra=tech_stack.get("infra", ["Railway"]),
+        rationale=tech_stack.get("rationale", "Stub — LangGraph not yet invoked for this project."),
     )
 
 
 @router.post("/projects/{project_id}/estimate", response_model=EstimationResponse)
-def estimate_effort(
+async def estimate_effort(
     project_id: str,
     db: Session = Depends(get_db),
 ) -> EstimationResponse:
-    # TODO(E5-T6): load LangGraph state, enforce phase guard, invoke run_phase()
+    project = _get_project_or_404(project_id, db)
+
+    if project.phase not in _POST_TEAM_PHASES:
+        raise HTTPException(
+            status_code=409,
+            detail="Phase 4 (team suggestion) must be complete before running effort estimation",
+        )
+
+    effort: dict = {}
+    try:
+        from app.services.workflow import run_phase
+        state = await run_phase(str(project.id))
+        effort = state.get("effort_estimates") or {}
+    except Exception:
+        pass
+
+    if project.phase == ProjectPhase.team:
+        project.phase = ProjectPhase.estimation
+        db.commit()
+
     return EstimationResponse(
-        epics=[{"title": "Stub Epic", "estimated_points": 8, "confidence": 0.8}],
-        total_points=8,
-        total_weeks=2.0,
+        epics=effort.get("epics", [{"title": "Stub Epic", "estimated_points": 8, "confidence": 0.8}]),
+        total_points=effort.get("total_points", 8),
+        total_weeks=effort.get("total_weeks", 2.0),
     )
 
 
@@ -253,7 +443,6 @@ def sync_to_github(
     project_id: str,
     db: Session = Depends(get_db),
 ) -> SyncResponse:
-    # TODO(E5-T1): replace stub epics with rows from epics/tasks tables once DB schema lands
     from app.services.github_sync import sync_epics_to_github
     result = sync_epics_to_github(epics=[])
     return SyncResponse(**result)

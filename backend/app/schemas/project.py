@@ -1,5 +1,19 @@
 from pydantic import BaseModel
 
+_PHASE_ORDER = {
+    "redaction": 1,
+    "chat": 2,
+    "techstack": 3,
+    "team": 4,
+    "estimation": 5,
+    "epics": 6,
+    "complete": 7,
+}
+
+
+def phase_to_int(phase: str) -> int:
+    return _PHASE_ORDER.get(str(phase), 1)
+
 
 class ProjectCreate(BaseModel):
     name: str
