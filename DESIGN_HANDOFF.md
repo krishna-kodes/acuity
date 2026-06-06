@@ -75,34 +75,41 @@ Charts: Recharts (line charts for trends, bar charts for per-phase breakdown, st
 ---
 
 ## Frontend implementation notes
-- Stack: Next.js 14+ App Router, TypeScript, Tailwind CSS, shadcn/ui
-- Use shadcn/ui for: form controls, buttons, cards, dialogs, badges (sync status), tabs (metrics), stepper (phase progress)
+- Stack: Next.js **16.2.7** App Router, TypeScript, Tailwind CSS **v4**, shadcn/ui v4.10.0
+- Tailwind v4: CSS-based `@theme` config in `globals.css` — no `tailwind.config.ts`
+- Use shadcn/ui for: form controls, buttons, cards, dialogs, badges, tabs (metrics)
+- Custom components (no shadcn): PhaseProgressStepper, SyncStatusBadge, EpicTaskListItem, ChatThread, TBDClarificationWidget, RedactionHighlight, MetricsStatCard, MetricsLineChart, MetricsBarChart
 - Use Recharts only on the metrics page
-- Keep API integration separate from UI scaffolding until Epic 4 (Backend API Contract) is complete — build with mock/stub data first
+- Keep API integration separate from UI scaffolding until Epic 4 is complete — build with mock/stub data first
 - Loading, empty, and error states required on every data-fetching screen
+- Icons: inline SVG only — no external icon library
 
 ---
 
-## Priority work for frontend
-1. Scaffold app shell, global layout, sidebar/navigation, and all 9 routes (Epic 1)
-2. Build project dashboard and upload screen (Epic 2)
-3. Build chat screen with TBD clarification widget
-4. Build redaction review screen
-5. Build epic/task review screen with sync status indicators
-6. Build metrics dashboard with all 5 tabs and Recharts
-7. Add responsive layout — mobile breakpoints TBD (ask Krishna for priority)
+## Implementation status
+
+| Epic | Tasks | Status |
+|------|-------|--------|
+| Epic 0 — Design System | Tokens, theming, all 10 base components, barrel index, design-system preview route | ✅ Complete |
+| Epic 1 — App Shell | Root layout, (app) route group, sidebar + topbar, all 9 route stubs, project dashboard | ✅ Complete |
+| Epic 2 — Upload screen | `/projects/new` | ⏳ Pending |
+| Epic 3 — Phase screens | Chat, redaction, tech stack, team, estimation, epics, metrics | ⏳ Pending |
+| Epic 4 — API integration | Fetch wrapper, API client, real data | ⏳ Pending |
 
 ---
 
 ## Assets and specs
-> Extract the following from the Claude Design file before starting implementation:
-- Color palette (primary, secondary, neutral, status colors for sync states)
-- Typography scale (font family, sizes, weights)
-- Spacing and layout grid
-- Icon set
-- Component-specific specs for the clarification widget and phase stepper
+> Extracted from Claude Design file and implemented in `frontend/app/globals.css` and `frontend/components/`:
+
+- **Color palette:** Full token set in `globals.css` `:root` — primary (`#3A6EA5`), surfaces, status colors (success/warning/destructive), sidebar tokens, chart palette
+- **Typography:** Inter (sans), JetBrains Mono (mono) via `next/font/google`
+- **Spacing / layout:** `--height-topbar: 56px`, `--width-sidebar: 220px`, border radius scale xs→full
+- **Icons:** Inline SVG in `AppSidebar` — dashboard, upload, shield, chat, layers, users, calculator, list, chart
+- **Component specs:** PhaseProgressStepper (6 phases, complete/in_progress/locked), TBDClarificationWidget (answered/tbd/oos), RedactionHighlight (confirmed/override)
+- **Preview route:** `http://localhost:3000/design-system` renders all Epic 0 components
 
 ---
 
 ## Open questions
 - **Mobile breakpoints:** Are there specific breakpoints or device targets to prioritize? (flagged — ask Krishna)
+- **Auth / user identity:** No auth screen in scope for MVP — confirm with Krishna

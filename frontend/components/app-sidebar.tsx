@@ -121,9 +121,10 @@ function buildProjectNav(projectId: string) {
 
 function NavLink({ item, activePhase }: { item: NavItem; activePhase?: string | null }) {
   const pathname = usePathname();
+  // Root path needs exact match; other paths use startsWith so sub-routes stay highlighted
   const isActive =
-    pathname === item.href ||
-    (item.phase && activePhase === item.phase);
+    (item.href === "/" ? pathname === "/" : pathname.startsWith(item.href)) ||
+    (item.phase != null && activePhase === item.phase);
 
   return (
     <Link
@@ -131,7 +132,7 @@ function NavLink({ item, activePhase }: { item: NavItem; activePhase?: string | 
       className={cn(
         "flex items-center gap-2.5 px-3 py-2 rounded-md text-sm transition-colors",
         isActive
-          ? "bg-accent text-accent-foreground font-medium"
+          ? "bg-accent text-accent-foreground font-medium ring-1 ring-inset ring-accent-foreground/10"
           : "text-text-secondary hover:bg-sidebar-hover hover:text-foreground"
       )}
     >
