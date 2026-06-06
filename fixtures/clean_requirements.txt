@@ -1,0 +1,35 @@
+Project Requirements: Inventory Management System v3
+
+1. Overview
+A warehouse inventory management system for tracking stock levels, orders, and supplier relationships across 12 distribution centers.
+
+2. Performance Requirements
+API response time: ≤ 200 ms at P95 under 500 concurrent users
+System uptime: 99.9% measured monthly (maximum 8.7 hours downtime per year)
+Batch job throughput: process 100,000 inventory records per hour
+Database query timeout: 5 seconds maximum
+
+3. Security Requirements
+Authentication: OAuth 2.0 with JWT tokens, 8-hour expiry
+Role-based access control: Warehouse Manager, Stock Controller, Read-Only Auditor
+All data encrypted at rest using AES-256
+All API endpoints require HTTPS (TLS 1.3)
+Password policy: minimum 12 characters, 1 uppercase, 1 number, 1 special character
+
+4. Data Requirements
+Stock records retained for 7 years (regulatory requirement)
+Transaction logs retained for 3 years
+Soft-delete only: no hard deletes on inventory records
+Audit trail required for all stock adjustments
+
+5. Integration Requirements
+ERP system: SAP S/4HANA via REST API, polling every 15 minutes
+Barcode scanner: supports Code 128 and QR Code formats
+Email notifications via SendGrid for low-stock alerts (threshold configurable per SKU)
+Export formats: CSV and XLSX for all report types
+
+6. Functional Requirements
+System must support concurrent editing with optimistic locking
+Stock adjustments require approval for quantities > 1000 units
+Automatic reorder triggers when stock falls below configurable minimum
+Supports 50,000 unique SKUs per warehouse

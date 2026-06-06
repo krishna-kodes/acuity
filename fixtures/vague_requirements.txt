@@ -1,0 +1,32 @@
+Project Requirements: Customer Portal
+
+1. Overview
+A customer-facing portal for account management and order tracking.
+
+2. Performance Requirements
+The system should be fast enough for users.
+Performance should be good under normal conditions.
+Page load times should be acceptable to end users.
+The database queries should be optimized appropriately.
+
+3. Security Requirements
+Security will be handled properly by the development team.
+The system should be secure against common threats.
+User data should be protected in a reasonable manner.
+Authentication should be implemented with best practices.
+
+4. Scalability
+The system should scale as needed.
+Infrastructure should be able to handle growth.
+The architecture should support future expansion when required.
+
+5. Reliability
+The system should have good uptime.
+Errors should be handled gracefully in most cases.
+Backups should be performed regularly.
+
+6. Functional Requirements
+Users must be able to log in with their email and password.
+Users must be able to view their order history.
+Users must be able to update their profile information.
+Admins must be able to manage user accounts.
