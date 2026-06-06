@@ -138,8 +138,10 @@ def sync_to_github(
     project_id: str,
     db: Session = Depends(get_db),
 ) -> SyncResponse:
-    # TODO(Epic 5 #39): call GitHub MCP sync tools
-    return SyncResponse(synced=0, skipped=0, failed=0, status=SyncStatus.pending)
+    # TODO(E5-T1): replace stub epics with rows from epics/tasks tables once DB schema lands
+    from app.services.github_sync import sync_epics_to_github
+    result = sync_epics_to_github(epics=[])
+    return SyncResponse(**result)
 
 
 @router.get("/projects/{project_id}/metrics", response_model=MetricsResponse)
