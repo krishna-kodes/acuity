@@ -499,7 +499,12 @@ async def chat(
     history = list(existing.values.get("chat_messages") or [])
     history.append({"role": "user", "content": body.message})
 
-    state_update = {"chat_messages": history, "chat_proceed": body.proceed}
+    state_update = {
+        "project_id": project_id,
+        "chat_messages": history,
+        "chat_proceed": body.proceed,
+        "phase_status": existing.values.get("phase_status") or {"phase_1": "complete"},
+    }
 
     async def event_generator():
         try:
@@ -509,7 +514,7 @@ async def chat(
                 etype = event["event"]
                 name = event.get("name", "")
 
-                if etype == "on_chat_model_stream" and "GroundednessResult" not in name:
+                if etype == "on_chat_model_stream" and name != "groundedness_judge":
                     token = event["data"]["chunk"].content
                     if token:
                         yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
@@ -527,6 +532,7 @@ async def chat(
             yield f"data: {json.dumps({'type': 'done'})}\n\n"
         except Exception as e:
             yield f"data: {json.dumps({'type': 'error', 'content': str(e)})}\n\n"
+            yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
     return StreamingResponse(
         event_generator(),

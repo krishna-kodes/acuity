@@ -66,8 +66,10 @@ async def test_chat_turn_appends_assistant_message():
 
     mock_gs_result = MagicMock()
     mock_gs_result.score = 0.9
+    mock_configured = MagicMock()
+    mock_configured.ainvoke = AsyncMock(return_value=mock_gs_result)
     mock_structured = MagicMock()
-    mock_structured.ainvoke = AsyncMock(return_value=mock_gs_result)
+    mock_structured.with_config = MagicMock(return_value=mock_configured)
     mock_llm = MagicMock()
     mock_llm.astream = fake_astream
     mock_llm.with_structured_output = MagicMock(return_value=mock_structured)

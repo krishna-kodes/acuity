@@ -161,11 +161,19 @@ _PHASE_6_TOOLS = [generate_epics_tool]
 # ---------------------------------------------------------------------------
 
 async def _phase_2_init_node(state: ProjectState) -> dict[str, Any]:
-    """Phase 2: initialise chat loop — sets phase in_progress, resets chat state."""
-    _require_phase_complete(state, 2)
+    """Phase 2: initialise chat loop."""
+    # Only guard if phase_status already exists (not a fresh thread seeded by endpoint)
+    if state.get("phase_status"):
+        _require_phase_complete(state, 2)
     ps = dict(state.get("phase_status") or {})
     ps["phase_2"] = "in_progress"
-    return {"phase_status": ps, "chat_messages": [], "chat_proceed": False}
+    # Only reset chat_messages if this is a fresh Phase 2 start (no existing messages)
+    existing_messages = state.get("chat_messages") or []
+    return {
+        "phase_status": ps,
+        "chat_messages": existing_messages if existing_messages else [],
+        "chat_proceed": False,
+    }
 
 
 @with_retry()
@@ -207,7 +215,7 @@ async def _chat_turn_node(state: ProjectState) -> dict[str, Any]:
     groundedness_score = None
     if settings.groundedness_check_enabled:
         judge = llm.with_structured_output(_GroundednessResult)
-        gs = await judge.ainvoke([
+        gs = await judge.with_config({"run_name": "groundedness_judge"}).ainvoke([
             HumanMessage(content=_GROUNDEDNESS_PROMPT.format(
                 context=context, response=response_content
             ))

@@ -118,3 +118,4 @@ async def test_chat_error_returns_error_event(async_client):
             events = await _collect_sse_events(response)
 
     assert any(e.get("type") == "error" for e in events)
+    assert any(e.get("type") == "done" for e in events)
