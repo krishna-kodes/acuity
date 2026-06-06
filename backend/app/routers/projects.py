@@ -18,7 +18,12 @@ from app.schemas.sync import SyncResponse, SyncStatus
 router = APIRouter(tags=["projects"])
 
 
-@router.post("/projects", response_model=ProjectResponse, status_code=201)
+@router.post(
+    "/projects",
+    summary="Create a new project",
+    response_model=ProjectResponse,
+    status_code=201,
+)
 def create_project(
     body: ProjectCreate,
     db: Session = Depends(get_db),
@@ -33,7 +38,12 @@ def create_project(
     )
 
 
-@router.post("/projects/{project_id}/documents", response_model=DocumentResponse, status_code=201)
+@router.post(
+    "/projects/{project_id}/documents",
+    summary="Upload requirements document",
+    response_model=DocumentResponse,
+    status_code=201,
+)
 def upload_document(
     project_id: str,
     file: UploadFile = File(...),
@@ -49,7 +59,11 @@ def upload_document(
     )
 
 
-@router.get("/projects/{project_id}/tbds", response_model=list[TBDItem])
+@router.get(
+    "/projects/{project_id}/tbds",
+    summary="Get detected TBD items",
+    response_model=list[TBDItem],
+)
 def get_tbds(
     project_id: str,
     db: Session = Depends(get_db),
@@ -60,6 +74,7 @@ def get_tbds(
 
 @router.post(
     "/projects/{project_id}/clarifications",
+    summary="Submit TBD clarification",
     response_model=ClarificationResponse,
     status_code=201,
 )
@@ -77,7 +92,12 @@ def create_clarification(
     )
 
 
-@router.post("/projects/{project_id}/proposal", response_model=ProposalResponse, status_code=201)
+@router.post(
+    "/projects/{project_id}/proposal",
+    summary="Generate proposal document",
+    response_model=ProposalResponse,
+    status_code=201,
+)
 def generate_proposal(
     project_id: str,
     db: Session = Depends(get_db),
@@ -91,7 +111,11 @@ def generate_proposal(
     )
 
 
-@router.get("/projects/{project_id}/proposal", response_model=ProposalResponse)
+@router.get(
+    "/projects/{project_id}/proposal",
+    summary="Retrieve generated proposal",
+    response_model=ProposalResponse,
+)
 def get_proposal(
     project_id: str,
     db: Session = Depends(get_db),
@@ -105,7 +129,11 @@ def get_proposal(
     )
 
 
-@router.post("/projects/{project_id}/stack", response_model=TechStackResponse)
+@router.post(
+    "/projects/{project_id}/stack",
+    summary="Run tech stack suggestion",
+    response_model=TechStackResponse,
+)
 def suggest_stack(
     project_id: str,
     db: Session = Depends(get_db),
@@ -120,7 +148,11 @@ def suggest_stack(
     )
 
 
-@router.post("/projects/{project_id}/estimate", response_model=EstimationResponse)
+@router.post(
+    "/projects/{project_id}/estimate",
+    summary="Run effort estimation",
+    response_model=EstimationResponse,
+)
 def estimate_effort(
     project_id: str,
     db: Session = Depends(get_db),
@@ -133,7 +165,11 @@ def estimate_effort(
     )
 
 
-@router.post("/projects/{project_id}/sync", response_model=SyncResponse)
+@router.post(
+    "/projects/{project_id}/sync",
+    summary="Sync epics and tasks to GitHub",
+    response_model=SyncResponse,
+)
 def sync_to_github(
     project_id: str,
     db: Session = Depends(get_db),
@@ -142,7 +178,11 @@ def sync_to_github(
     return SyncResponse(synced=0, skipped=0, failed=0, status=SyncStatus.pending)
 
 
-@router.get("/projects/{project_id}/metrics", response_model=MetricsResponse)
+@router.get(
+    "/projects/{project_id}/metrics",
+    summary="Retrieve project metrics",
+    response_model=MetricsResponse,
+)
 def get_metrics(
     project_id: str,
     db: Session = Depends(get_db),
