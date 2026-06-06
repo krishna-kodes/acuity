@@ -53,8 +53,8 @@ export function PhaseProgressStepper({
 
   return (
     <div className={cn("flex flex-col gap-3", className)}>
-      {/* Step track */}
-      <div className="flex items-center gap-0">
+      {/* Step track — horizontal scroll on very small screens */}
+      <div className="flex items-center gap-0 overflow-x-auto pb-1 scrollbar-none">
         {phases.map((phase, i) => {
           const isLast = i === phases.length - 1;
           const isComplete = phase.status === "complete";

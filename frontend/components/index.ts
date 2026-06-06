@@ -1,4 +1,5 @@
 export { AppSidebar } from "./app-sidebar";
+export { AppShell } from "./app-shell";
 export { AppTopbar } from "./app-topbar";
 export { ChatThread } from "./chat-thread";
 export type { MessageRole, ChatMessage } from "./chat-thread";
