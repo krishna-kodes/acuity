@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, use } from "react";
 import { PhaseProgressStepper } from "@/components/phase-progress-stepper";
 import { EpicTaskListItem } from "@/components/epic-task-list-item";
 import { SyncStatusBadge } from "@/components/sync-status-badge";
@@ -101,7 +101,8 @@ function SyncSummary({ epics }: { epics: EpicItem[] }) {
   );
 }
 
-export default function EpicsPage({ params }: { params: { id: string } }) {
+export default function EpicsPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = use(params);
   const [epics, setEpics]       = useState<EpicItem[]>(INITIAL_EPICS);
   const [syncState, setSyncState] = useState<SyncState>("idle");
   const [syncError, setSyncError] = useState<string | null>(null);

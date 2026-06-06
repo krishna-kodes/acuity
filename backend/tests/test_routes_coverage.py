@@ -1,0 +1,153 @@
+"""E6-T3: Route coverage tests for gaps not covered by test_e5t6.py or test_routes.py.
+
+Covers:
+- GET /projects (list all)
+- GET /projects/{id}/export/proposal (FileResponse + disk I/O)
+- GET /projects/{id}/metrics (shape + 404)
+- 404 for missing project_id on key GET endpoints
+"""
+
+import pytest
+from app.models.enums import ProjectPhase, ProjectStatus
+from app.models.project import Project, Proposal
+
+
+# ---------------------------------------------------------------------------
+# GET /projects — list all
+# ---------------------------------------------------------------------------
+
+def test_list_projects_returns_200(client):
+    resp = client.get("/api/v1/projects")
+    assert resp.status_code == 200
+    assert isinstance(resp.json(), list)
+
+
+def test_list_projects_includes_preseeded_project(client, project_id):
+    resp = client.get("/api/v1/projects")
+    ids = [p["id"] for p in resp.json()]
+    assert project_id in ids
+
+
+def test_list_projects_response_shape(client):
+    resp = client.get("/api/v1/projects")
+    p = resp.json()[0]
+    for field in ("id", "name", "status", "current_phase", "created_at"):
+        assert field in p, f"Missing field: {field}"
+
+
+def test_list_projects_domain_field_present(client, db_session):
+    proj = Project(
+        name="Domain Test",
+        domain="FinTech",
+        phase=ProjectPhase.redaction,
+        status=ProjectStatus.active,
+    )
+    db_session.add(proj)
+    db_session.commit()
+
+    resp = client.get("/api/v1/projects")
+    match = next((x for x in resp.json() if x["name"] == "Domain Test"), None)
+    assert match is not None
+    assert match["domain"] == "FinTech"
+
+
+def test_list_projects_domain_null_when_not_set(client):
+    resp = client.get("/api/v1/projects")
+    # conftest project has no domain
+    item = next(x for x in resp.json() if x["name"] == "Test Project")
+    assert item["domain"] is None
+
+
+def test_list_projects_ordered_newest_first(client, db_session):
+    p1 = Project(name="Older", phase=ProjectPhase.redaction, status=ProjectStatus.draft)
+    p2 = Project(name="Newer", phase=ProjectPhase.redaction, status=ProjectStatus.draft)
+    db_session.add(p1)
+    db_session.add(p2)
+    db_session.commit()
+
+    resp = client.get("/api/v1/projects")
+    names = [p["name"] for p in resp.json()]
+    # Newer should appear before Older (ordered by created_at desc)
+    assert names.index("Newer") < names.index("Older")
+
+
+# ---------------------------------------------------------------------------
+# GET /projects/{id}/export/proposal
+# ---------------------------------------------------------------------------
+
+def test_export_proposal_file_missing_on_disk_returns_404(client, project_id):
+    # conftest proposal has content_path="documents/stub.docx" which doesn't exist
+    resp = client.get(f"/api/v1/projects/{project_id}/export/proposal")
+    assert resp.status_code == 404
+
+
+def test_export_proposal_returns_file_with_attachment_header(client, project_id, db_session, tmp_path):
+    from docx import Document as DocxDocument
+
+    docx_path = str(tmp_path / "proposal.docx")
+    DocxDocument().save(docx_path)
+
+    db_session.query(Proposal).filter(
+        Proposal.project_id == int(project_id)
+    ).update({"content_path": docx_path})
+    db_session.commit()
+
+    resp = client.get(f"/api/v1/projects/{project_id}/export/proposal")
+    assert resp.status_code == 200
+    assert "attachment" in resp.headers.get("content-disposition", "")
+
+
+def test_export_proposal_content_type_is_docx(client, project_id, db_session, tmp_path):
+    from docx import Document as DocxDocument
+
+    docx_path = str(tmp_path / "proposal.docx")
+    DocxDocument().save(docx_path)
+
+    db_session.query(Proposal).filter(
+        Proposal.project_id == int(project_id)
+    ).update({"content_path": docx_path})
+    db_session.commit()
+
+    resp = client.get(f"/api/v1/projects/{project_id}/export/proposal")
+    assert "wordprocessingml" in resp.headers.get("content-type", "")
+
+
+def test_export_proposal_missing_project_returns_404(client):
+    resp = client.get("/api/v1/projects/99999/export/proposal")
+    assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# GET /projects/{id}/metrics
+# ---------------------------------------------------------------------------
+
+def test_metrics_returns_200(client, project_id):
+    resp = client.get(f"/api/v1/projects/{project_id}/metrics")
+    assert resp.status_code == 200
+
+
+def test_metrics_response_shape(client, project_id):
+    resp = client.get(f"/api/v1/projects/{project_id}/metrics")
+    data = resp.json()
+    for field in ("total_tokens", "total_cost_usd", "phase_latencies", "eval_pass_rate", "github_sync_success_rate"):
+        assert field in data, f"Missing field: {field}"
+
+
+def test_metrics_missing_project_returns_404(client):
+    resp = client.get("/api/v1/projects/99999/metrics")
+    assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# 404 for missing project on key GET endpoints
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("path", [
+    "/api/v1/projects/99999/tbds",
+    "/api/v1/projects/99999/proposal",
+    "/api/v1/projects/99999/redaction-decisions",
+    "/api/v1/projects/99999/metrics",
+])
+def test_missing_project_returns_404(client, path):
+    resp = client.get(path)
+    assert resp.status_code == 404

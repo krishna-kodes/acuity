@@ -144,6 +144,7 @@ def get_redaction_decisions(
     """List detected PII spans for PM review on the redaction screen."""
     from app.models.pii import PIIDetection
 
+    _get_project_or_404(project_id, db)
     docs = db.query(Document).filter(Document.project_id == int(project_id)).all()
     if not docs:
         return []
@@ -222,6 +223,7 @@ def get_tbds(
     from app.models.clarification import Clarification
     from app.models.enums import TBDLevel
 
+    _get_project_or_404(project_id, db)
     try:
         pid = int(project_id)
     except ValueError:
@@ -477,6 +479,7 @@ def get_metrics(
     project_id: str,
     db: Session = Depends(get_db),
 ) -> MetricsResponse:
+    _get_project_or_404(project_id, db)
     # TODO(Epic 5 #40): aggregate from metrics + latency_logs tables
     return MetricsResponse(
         total_tokens=0,

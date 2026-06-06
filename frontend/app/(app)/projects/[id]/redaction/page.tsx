@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, use } from "react";
 import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { PhaseProgressStepper } from "@/components/phase-progress-stepper";
@@ -33,15 +33,16 @@ function mapDetections(raw: Array<{
   }));
 }
 
-export default function RedactionPage({ params }: { params: { id: string } }) {
+export default function RedactionPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = use(params);
   const router = useRouter();
   const [localDecisions, setLocalDecisions] = useState<Record<number, "confirmed" | "override">>({});
   const [proceeding, setProceeding] = useState(false);
 
   const { data: rawDetections, isLoading } = useQuery({
-    queryKey: ["redaction-decisions", params.id],
+    queryKey: ["redaction-decisions", id],
     queryFn: async () => {
-      const { data, error } = await getRedactionDecisions(params.id);
+      const { data, error } = await getRedactionDecisions(id);
       if (error) throw new Error(String(error));
       return data ?? [];
     },
@@ -77,12 +78,12 @@ export default function RedactionPage({ params }: { params: { id: string } }) {
         confirmed: (localDecisions[d.id] ?? d.decision) === "confirmed",
       }));
       if (decisions.length > 0) {
-        await patchRedactionDecisions(params.id, decisions);
+        await patchRedactionDecisions(id, decisions);
       }
     } catch {
       // Non-fatal — proceed anyway even if patch fails
     }
-    router.push(getNextPhaseRoute("redaction", params.id));
+    router.push(getNextPhaseRoute("redaction", id));
   }
 
   return (

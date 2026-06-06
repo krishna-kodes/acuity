@@ -46,10 +46,9 @@ def test_get_tbds_returns_empty_for_new_project(client, project_id):
     assert resp.json() == []
 
 
-def test_get_tbds_invalid_project_id_returns_empty(client):
+def test_get_tbds_invalid_project_id_returns_404(client):
     resp = client.get("/api/v1/projects/not-an-id/tbds")
-    assert resp.status_code == 200
-    assert resp.json() == []
+    assert resp.status_code == 404
 
 
 # ---------------------------------------------------------------------------
