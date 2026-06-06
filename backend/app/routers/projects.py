@@ -1,15 +1,18 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, File, UploadFile
+
+from app.schemas.clarification import ClarificationCreate
+from app.schemas.project import ProjectCreate
 
 router = APIRouter(tags=["projects"])
 
 
 @router.post("/projects")
-def create_project():
+def create_project(body: ProjectCreate):
     pass
 
 
 @router.post("/projects/{project_id}/documents")
-def upload_document(project_id: str):
+def upload_document(project_id: str, file: UploadFile = File(...)):
     pass
 
 
@@ -19,7 +22,7 @@ def get_tbds(project_id: str):
 
 
 @router.post("/projects/{project_id}/clarifications")
-def create_clarification(project_id: str):
+def create_clarification(project_id: str, body: ClarificationCreate):
     pass
 
 
