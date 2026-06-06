@@ -1,7 +1,7 @@
 from fastapi import APIRouter, File, UploadFile
 
-from app.schemas.project import ProjectCreate
 from app.schemas.clarification import ClarificationCreate
+from app.schemas.project import ProjectCreate
 
 router = APIRouter(tags=["projects"])
 

@@ -1,12 +1,12 @@
+from app.schemas.clarification import ClarificationCreate
 from app.schemas.project import (
-    ProjectCreate, ProjectResponse, TBDItem,
-    TechStackResponse, EstimationResponse,
+    EstimationResponse,
+    ProjectCreate,
+    ProjectResponse,
+    TBDItem,
+    TechStackResponse,
 )
-from app.schemas.document import DocumentResponse
-from app.schemas.clarification import ClarificationCreate, ClarificationResponse
-from app.schemas.proposal import ProposalResponse
-from app.schemas.sync import SyncStatus, SyncResponse
-from app.schemas.metrics import MetricsResponse
+from app.schemas.sync import SyncStatus
 
 
 def test_project_create_fields():
