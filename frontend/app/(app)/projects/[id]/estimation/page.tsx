@@ -80,39 +80,43 @@ export default function EstimationPage({ params }: { params: { id: string } }) {
 
         {/* Estimate table */}
         <div className="bg-card border border-border rounded-xl overflow-hidden">
-          <div className="px-4 py-3 border-b border-border bg-surface-subtle/50 grid grid-cols-12 gap-2 text-[10px] font-semibold uppercase tracking-wide text-text-muted">
-            <span className="col-span-4">Area</span>
-            <span className="col-span-3 text-center">Low / Mid / High (days)</span>
-            <span className="col-span-2 text-center">Confidence</span>
-            <span className="col-span-3">Notes</span>
-          </div>
-
-          <div className="divide-y divide-border">
-            {MOCK_ESTIMATES.map((row) => (
-              <div key={row.area} className="grid grid-cols-12 gap-2 px-4 py-3 items-start">
-                <span className="col-span-4 text-sm font-medium text-foreground leading-snug">{row.area}</span>
-                <span className="col-span-3 text-center text-xs text-text-secondary tabular-nums font-mono">
-                  {row.low} / <strong className="text-foreground">{row.mid}</strong> / {row.high}
-                </span>
-                <span className="col-span-2 flex justify-center">
-                  <span className={cn("text-[10px] font-medium px-2 py-0.5 rounded-full capitalize", CONFIDENCE_STYLES[row.confidence])}>
-                    {row.confidence}
-                  </span>
-                </span>
-                <span className="col-span-3 text-[11px] text-text-secondary leading-relaxed">{row.notes}</span>
+          <div className="overflow-x-auto">
+            <div className="min-w-[520px]">
+              <div className="px-4 py-3 border-b border-border bg-surface-subtle/50 grid grid-cols-12 gap-2 text-[10px] font-semibold uppercase tracking-wide text-text-muted">
+                <span className="col-span-4">Area</span>
+                <span className="col-span-3 text-center">Low / Mid / High (days)</span>
+                <span className="col-span-2 text-center">Confidence</span>
+                <span className="col-span-3 hidden sm:block">Notes</span>
               </div>
-            ))}
-          </div>
 
-          {/* Totals row */}
-          <div className="grid grid-cols-12 gap-2 px-4 py-3 border-t border-border bg-surface-subtle/50 items-center">
-            <span className="col-span-4 text-xs font-semibold text-foreground">Total</span>
-            <span className="col-span-3 text-center text-xs font-semibold tabular-nums font-mono text-foreground">
-              {totalLow} / {totalMid} / {totalHigh}
-            </span>
-            <span className="col-span-5 text-[11px] text-text-muted">
-              ≈ {Math.round(totalMid / 5)} weeks at full team capacity
-            </span>
+              <div className="divide-y divide-border">
+                {MOCK_ESTIMATES.map((row) => (
+                  <div key={row.area} className="grid grid-cols-12 gap-2 px-4 py-3 items-start">
+                    <span className="col-span-4 text-sm font-medium text-foreground leading-snug">{row.area}</span>
+                    <span className="col-span-3 text-center text-xs text-text-secondary tabular-nums font-mono">
+                      {row.low} / <strong className="text-foreground">{row.mid}</strong> / {row.high}
+                    </span>
+                    <span className="col-span-2 flex justify-center">
+                      <span className={cn("text-[10px] font-medium px-2 py-0.5 rounded-full capitalize", CONFIDENCE_STYLES[row.confidence])}>
+                        {row.confidence}
+                      </span>
+                    </span>
+                    <span className="col-span-3 text-[11px] text-text-secondary leading-relaxed hidden sm:block">{row.notes}</span>
+                  </div>
+                ))}
+              </div>
+
+              {/* Totals row */}
+              <div className="grid grid-cols-12 gap-2 px-4 py-3 border-t border-border bg-surface-subtle/50 items-center">
+                <span className="col-span-4 text-xs font-semibold text-foreground">Total</span>
+                <span className="col-span-3 text-center text-xs font-semibold tabular-nums font-mono text-foreground">
+                  {totalLow} / {totalMid} / {totalHigh}
+                </span>
+                <span className="col-span-5 text-[11px] text-text-muted hidden sm:block">
+                  ≈ {Math.round(totalMid / 5)} weeks at full team capacity
+                </span>
+              </div>
+            </div>
           </div>
         </div>
 

@@ -146,10 +146,10 @@ export default function ChatPage({ params }: { params: { id: string } }) {
       </div>
 
       {/* Main content — fills remaining height */}
-      <div className="flex flex-1 min-h-0 overflow-hidden">
+      <div className="flex flex-col lg:flex-row flex-1 min-h-0 overflow-hidden">
 
         {/* Left: chat */}
-        <div className="flex flex-col flex-1 min-w-0 border-r border-border">
+        <div className="flex flex-col flex-1 min-w-0 border-b lg:border-b-0 lg:border-r border-border min-h-[50vh] lg:min-h-0">
           {/* Messages */}
           <div className="flex-1 overflow-y-auto px-4 py-4">
             <ChatThread messages={messages} isLoading={isLoading} />
@@ -196,7 +196,7 @@ export default function ChatPage({ params }: { params: { id: string } }) {
         </div>
 
         {/* Right: TBD widget + generate proposal */}
-        <div className="w-80 shrink-0 flex flex-col overflow-hidden">
+        <div className="w-full lg:w-80 shrink-0 flex flex-col overflow-hidden lg:overflow-y-auto">
           <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
             <span className="text-xs font-semibold text-foreground">TBD Items</span>
             {outstandingTbds > 0 && (
