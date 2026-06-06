@@ -92,9 +92,44 @@ Charts: Recharts (line charts for trends, bar charts for per-phase breakdown, st
 |------|-------|--------|
 | Epic 0 — Design System | Tokens, theming, all 10 base components, barrel index, design-system preview route | ✅ Complete |
 | Epic 1 — App Shell | Root layout, (app) route group, sidebar + topbar, all 9 route stubs, project dashboard | ✅ Complete |
-| Epic 2 — Upload screen | `/projects/new` | ⏳ Pending |
-| Epic 3 — Phase screens | Chat, redaction, tech stack, team, estimation, epics, metrics | ⏳ Pending |
+| Epic 2 — Upload screen | `/projects/new` drag-drop upload | ✅ Complete |
+| Epic 3 — Phase screens | All 7 phase pages + phase transition lib | ✅ Complete |
 | Epic 4 — API integration | Fetch wrapper, API client, real data | ⏳ Pending |
+
+---
+
+## Design validation (E3-T4) — June 2026
+
+Audit of implemented screens against design spec. Each finding is tagged **MINOR** (cosmetic/label), **GAP** (missing feature needed for Epic 4 wiring), or **POST-MVP** (out of scope).
+
+### Confirmed matches ✅
+- **Phase stepper** — 6 phases, complete/in_progress/locked states, connector lines, `onRerun` prop available on the component
+- **TBD widget** — 3 actions (Answer / Keep TBD / Out of Scope), expand/collapse per item, outstanding/resolved counts
+- **RedactionHighlight** — per-row confirm/override, "Redact all" batch, confidence badge, type colour coding
+- **Chat layout** — two-column desktop (chat + TBD panel), stacked mobile, generate-proposal gate requires all TBDs resolved
+- **Metrics** — 5 tabs, stat cards, Recharts line and bar charts, all tab content wired to mock data
+- **EpicTaskListItem** — checkbox skip toggle, task expand, per-item sync status badge
+- **Mobile responsive** — sidebar overlay + hamburger, estimation table `overflow-x-auto`, chat panel stacks on `<lg`
+
+### Discrepancies and gaps
+
+| # | Screen | Issue | Severity |
+|---|--------|-------|----------|
+| D1 | TBD widget | Button label "Keep TBD" should be "TBD" per design spec | MINOR |
+| D2 | Phase stepper | `onRerun` prop exists on `PhaseProgressStepper` but no page passes it — "Re-run Phase" is never rendered | GAP |
+| D3 | Epics page | `EpicItem` and `TaskItem` have no `description` field; GitHub Issues require a `body`; Epic 4 sync will need this | GAP |
+| D4 | Epics page | Sync error state is global (`ErrorBanner`) — design specifies inline error per epic row | GAP |
+| D5 | Redaction page | Shows a flat list of PII spans, not inline highlights within the document text — acceptable for mock; Epic 4 needs a document text field or a separate inline-view component | GAP |
+| D6 | Dashboard | `ProjectCard` shows current phase name only; design shows phase progress fraction (e.g. "3 / 6") | MINOR |
+| D7 | All screens | No "Export DOCX" button — `GET /api/v1/projects/{id}/export/proposal` is in API spec but has no UI entry point | GAP |
+| D8 | Chat page | TBD action "oos" label is "Out of Scope" (no hyphen) vs design "Out-of-Scope" | MINOR |
+
+### Epic 4 action items derived from this audit
+- **D2** Wire `onRerun` on each page by passing `handleRerun` to `PhaseProgressStepper` (requires `POST /api/v1/projects/{id}/phases/{n}/rerun`)
+- **D3** Add `description?: string` to `EpicItem` and `TaskItem`; populate from API response; render as collapsed sub-text under title
+- **D4** Add `syncError?: string` to `EpicItem`; render inline below task list when set
+- **D5** Persist anonymized document text in backend response; add scrollable document view alongside the span list
+- **D7** Add "Export Proposal" button on the proposal/review screen (or sidebar); call `GET /api/v1/projects/{id}/export/proposal` with `Content-Disposition: attachment`
 
 ---
 
