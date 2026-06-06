@@ -1,0 +1,45 @@
+Project Proposal: Inventory Management System v3
+
+## Problem Statement
+The current inventory management process relies on spreadsheets maintained across 12 distribution centers, resulting in data inconsistencies, 4-hour delays in stock visibility, and an estimated $2.3M annual loss from stockouts and over-ordering. A centralised, real-time system is required to eliminate these inefficiencies.
+
+## Proposed Solution
+Build a cloud-hosted inventory management platform with a React frontend and FastAPI backend, integrating with the existing SAP S/4HANA ERP via REST APIs. The system will provide real-time stock visibility, automated reorder workflows, and role-based access for warehouse managers, stock controllers, and auditors.
+
+## Technical Architecture
+- **Frontend:** React 18 with TypeScript, deployed on AWS CloudFront
+- **Backend:** FastAPI (Python 3.12), containerised via Docker, deployed on AWS ECS Fargate
+- **Database:** PostgreSQL 16 on AWS RDS Multi-AZ for high availability
+- **Cache:** Redis 7 for session management and real-time stock counters
+- **Message queue:** AWS SQS for async ERP sync jobs
+- **Authentication:** AWS Cognito with OAuth 2.0 / JWT
+- **Storage:** AWS S3 for document exports (CSV, XLSX)
+- **Monitoring:** AWS CloudWatch + Datadog for APM
+
+## Team
+- 1 × Senior Backend Engineer (Python/FastAPI, SAP integration)
+- 1 × Frontend Engineer (React/TypeScript)
+- 1 × DevOps Engineer (AWS, Terraform, CI/CD)
+- 1 × QA Engineer (automated testing, UAT coordination)
+- 0.5 × Product Manager (requirements and stakeholder management)
+
+Total team size: 4.5 FTE
+
+## Timeline
+- **Sprint 1–2 (Weeks 1–4):** Infrastructure setup, authentication, core data models
+- **Sprint 3–4 (Weeks 5–8):** Stock management APIs, barcode scanner integration
+- **Sprint 5–6 (Weeks 9–12):** ERP sync, reporting, low-stock alerts
+- **Sprint 7–8 (Weeks 13–16):** Frontend completion, performance testing, UAT
+- **Sprint 9 (Weeks 17–18):** Staged rollout to 3 pilot warehouses, hypercare
+
+Total duration: 18 weeks (4.5 months)
+Estimated cost: $380,000 (includes 3 months post-launch support)
+
+## Risks
+| Risk | Likelihood | Impact | Mitigation |
+|------|-----------|--------|------------|
+| SAP API documentation incomplete | High | High | Allocate 2-week spike for SAP integration; negotiate access to SAP sandbox |
+| Data migration complexity (12 sites) | Medium | High | Parallel-run old and new systems for 4 weeks; phased site rollout |
+| Scope creep from warehouse managers | Medium | Medium | Lock requirements after sprint 2; change requests via formal RFC process |
+| AWS cost overrun | Low | Medium | Set billing alerts at 80% of budget; right-size instances after load testing |
+| Key person dependency on SAP engineer | Low | High | Document all integration code; pair-program critical components |

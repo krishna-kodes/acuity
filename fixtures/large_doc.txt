@@ -1,0 +1,1 @@
+STUB — size simulation handled by MockRunner via simulate_size_mb input field. This file intentionally small.

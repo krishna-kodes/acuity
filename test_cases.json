@@ -1,0 +1,251 @@
+[
+  {
+    "id": "tc-001",
+    "description": "Explicit TBD detection: document contains literal 'TBD' for SLA and response time fields",
+    "phase": 2,
+    "input": {
+      "query": "What is the SLA for the API?",
+      "document_fixture": "fixtures/sla_tbd.txt"
+    },
+    "expected": {
+      "tbd_items": [
+        {"level": 1, "contains": "SLA"},
+        {"level": 1, "contains": "response time"}
+      ],
+      "tool_calls": ["detect_tbds"],
+      "groundedness_min": 0.7
+    },
+    "max_tool_iterations": 5,
+    "regression": false
+  },
+  {
+    "id": "tc-002",
+    "description": "Vague TBD detection: LLM-as-judge flags 'performance should be good' and 'security will be handled properly' as Level 2",
+    "phase": 2,
+    "input": {
+      "query": "What are the performance and security requirements?",
+      "document_fixture": "fixtures/vague_requirements.txt"
+    },
+    "expected": {
+      "tbd_items": [
+        {"level": 2, "contains": "performance"},
+        {"level": 2, "contains": "security"}
+      ],
+      "groundedness_min": 0.6
+    },
+    "max_tool_iterations": 5,
+    "regression": false
+  },
+  {
+    "id": "tc-003",
+    "description": "Oversized file: document > 10 MB must return HTTP 422 with MAX_FILE_SIZE_MB error",
+    "phase": 1,
+    "input": {
+      "document_fixture": "fixtures/large_doc.txt",
+      "simulate_size_mb": 11
+    },
+    "expected": {
+      "http_status": 422,
+      "error_contains": "MAX_FILE_SIZE_MB"
+    },
+    "max_tool_iterations": 1,
+    "regression": false
+  },
+  {
+    "id": "tc-004",
+    "description": "Unsupported file extension (.png) must return HTTP 422",
+    "phase": 1,
+    "input": {
+      "document_fixture": "fixtures/clean_requirements.txt",
+      "simulate_extension": ".png"
+    },
+    "expected": {
+      "http_status": 422
+    },
+    "max_tool_iterations": 1,
+    "regression": false
+  },
+  {
+    "id": "tc-005",
+    "description": "Valid PDF ingestion: document status becomes ingested and ChromaDB collection has >= 1 chunk",
+    "phase": 1,
+    "input": {
+      "document_fixture": "fixtures/clean_requirements.txt",
+      "simulate_extension": ".pdf"
+    },
+    "expected": {
+      "document_status": "ingested",
+      "chroma_chunk_count_min": 1
+    },
+    "max_tool_iterations": 3,
+    "regression": false
+  },
+  {
+    "id": "tc-006",
+    "description": "Groundedness check: LLM response about uptime requirement is fully supported by retrieved context",
+    "phase": 2,
+    "input": {
+      "query": "What is the system uptime requirement?",
+      "document_fixture": "fixtures/clean_requirements.txt"
+    },
+    "expected": {
+      "retrieved_chunk_ids": ["chunk_1", "chunk_3"],
+      "groundedness_min": 0.7,
+      "answer_query": "uptime requirement"
+    },
+    "max_tool_iterations": 5,
+    "regression": false
+  },
+  {
+    "id": "tc-007",
+    "description": "Query rewriting: 3 sub-queries generated internally for a single user query",
+    "phase": 2,
+    "input": {
+      "query": "What are the security and authentication requirements?",
+      "document_fixture": "fixtures/clean_requirements.txt"
+    },
+    "expected": {
+      "sub_query_count_min": 3,
+      "tool_calls": ["rewrite_query", "retrieve_chunks"]
+    },
+    "max_tool_iterations": 8,
+    "regression": false
+  },
+  {
+    "id": "tc-008",
+    "description": "Proposal completeness: generated proposal scores >= 0.75 on DeepEval G-Eval rubric",
+    "phase": 2,
+    "input": {
+      "document_fixture": "fixtures/proposal_complete.txt",
+      "trigger": "generate_proposal"
+    },
+    "expected": {
+      "proposal_text": "fixtures/proposal_complete.txt",
+      "proposal_completeness_min": 0.75
+    },
+    "max_tool_iterations": 5,
+    "regression": false
+  },
+  {
+    "id": "tc-009",
+    "description": "Tech stack suggestion: every suggested technology exists in approved_technologies table",
+    "phase": 3,
+    "input": {
+      "project_fixture": "stubbed_phase2_complete"
+    },
+    "expected": {
+      "tech_stack": {
+        "approved_only": true,
+        "required_categories": ["frontend", "backend", "database", "infra"]
+      }
+    },
+    "max_tool_iterations": 5,
+    "regression": false
+  },
+  {
+    "id": "tc-010",
+    "description": "Tech stack rationale quality: DeepEval G-Eval scores rationale >= 0.70 and rationale references employee skills",
+    "phase": 3,
+    "input": {
+      "project_fixture": "stubbed_phase2_complete"
+    },
+    "expected": {
+      "tech_stack": {
+        "rationale_quality_min": 0.70,
+        "rationale_references_skills": true
+      }
+    },
+    "max_tool_iterations": 5,
+    "regression": false
+  },
+  {
+    "id": "tc-011",
+    "description": "Phase ordering compliance: Phase 3 start blocked with HTTP 409 when Phase 2 is still in_progress",
+    "phase": 3,
+    "input": {
+      "phase_status": {
+        "phase_1": "complete",
+        "phase_2": "in_progress"
+      },
+      "target_phase": 3
+    },
+    "expected": {
+      "phase_status": {
+        "phase_2_must_be_complete": true
+      },
+      "http_status": 409
+    },
+    "max_tool_iterations": 1,
+    "regression": false
+  },
+  {
+    "id": "tc-012",
+    "description": "Effort estimate plausibility: total_weeks is within 3x of nearest comparable historical project",
+    "phase": 5,
+    "input": {
+      "project_fixture": "stubbed_phase4_complete",
+      "historical_range_weeks": [4, 12]
+    },
+    "expected": {
+      "effort_range": {
+        "total_weeks_min": 1,
+        "total_weeks_max": 36,
+        "comparable_max_ratio": 3.0
+      },
+      "tool_calls": ["get_historical_projects", "estimate_effort"]
+    },
+    "max_tool_iterations": 10,
+    "regression": false
+  },
+  {
+    "id": "tc-013",
+    "description": "Loop safety: LangGraph effort estimation agent completes within max_tool_iterations",
+    "phase": 5,
+    "input": {
+      "project_fixture": "stubbed_phase4_complete"
+    },
+    "expected": {
+      "tool_calls": ["get_historical_projects", "estimate_effort"],
+      "loop_safety": true
+    },
+    "max_tool_iterations": 5,
+    "regression": false
+  },
+  {
+    "id": "tc-014",
+    "description": "GitHub ticket structure: epics map to Milestones, tasks map to Issues with 'task' label and milestone_number",
+    "phase": 6,
+    "input": {
+      "project_fixture": "stubbed_phase5_complete"
+    },
+    "expected": {
+      "github_tickets": {
+        "epics_as_milestones": true,
+        "tasks_as_issues": true,
+        "task_label_required": "task",
+        "milestone_number_required": true
+      }
+    },
+    "max_tool_iterations": 10,
+    "regression": false
+  },
+  {
+    "id": "tc-015",
+    "description": "Round-trip sync: document upload through to GitHub sync produces epics with milestone numbers and tasks with issue numbers",
+    "phase": 6,
+    "input": {
+      "document_fixture": "fixtures/clean_requirements.txt",
+      "simulate_extension": ".pdf",
+      "full_pipeline": true
+    },
+    "expected": {
+      "round_trip": {
+        "epics_have_milestone_number": true,
+        "tasks_have_issue_number": true,
+        "sync_status_not_pending": true
+      }
+    },
+    "max_tool_iterations": 15,
+    "regression": false
+  }
+]
