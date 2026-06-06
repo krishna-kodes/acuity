@@ -17,11 +17,13 @@ def phase_to_int(phase: str) -> int:
 
 class ProjectCreate(BaseModel):
     name: str
+    domain: str | None = None
 
 
 class ProjectResponse(BaseModel):
     id: str
     name: str
+    domain: str | None
     status: str
     current_phase: int
     created_at: str

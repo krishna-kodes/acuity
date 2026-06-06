@@ -2,10 +2,12 @@
 
 import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { useQuery } from "@tanstack/react-query";
 import { PhaseProgressStepper } from "@/components/phase-progress-stepper";
 import { ChatThread } from "@/components/chat-thread";
 import { TBDClarificationWidget } from "@/components/tbd-clarification-widget";
 import { getPhasesForRoute, getNextPhaseRoute } from "@/lib/project-phases";
+import { getTBDs, submitClarification, generateProposal } from "@/lib/api";
 import type { ChatMessage } from "@/components/chat-thread";
 import type { TBDItem, TBDAction } from "@/components/tbd-clarification-widget";
 import { cn } from "@/lib/utils";
@@ -19,37 +21,12 @@ const INITIAL_MESSAGES: ChatMessage[] = [
   },
 ];
 
-// TODO (Epic 4): fetch from GET /api/v1/projects/{id}/tbds
-const INITIAL_TBDS: TBDItem[] = [
-  {
-    id: "tbd1",
-    title: "Processing SLA",
-    desc: "Section 3.2 states 'documents should be processed promptly' but does not specify a target turnaround time. What is the expected SLA for a 50-page PDF?",
-    level: "Explicit TBD",
-    status: "open",
-  },
-  {
-    id: "tbd2",
-    title: "Team Size",
-    desc: "Section 4.1 mentions 'a small engineering team' without quantifying headcount. How many engineers are available for this project?",
-    level: "Vague statement",
-    status: "open",
-  },
-  {
-    id: "tbd3",
-    title: "Cloud Provider",
-    desc: "The deployment section does not specify a target cloud provider or region. Where will this system be hosted?",
-    level: "Explicit TBD",
-    status: "open",
-  },
-  {
-    id: "tbd4",
-    title: "Authentication Method",
-    desc: "User authentication is mentioned but no method is specified (SSO, OAuth, email/password). What authentication strategy should be used?",
-    level: "Missing section",
-    status: "open",
-  },
-];
+const TBD_LEVEL_LABELS: Record<number, TBDItem["level"]> = {
+  1: "Explicit TBD",
+  2: "Vague statement",
+  3: "Missing section",
+  4: "Contradiction",
+};
 
 // Simulated AI responses keyed by message content patterns
 function simulatedReply(userText: string): string {
@@ -67,16 +44,36 @@ function simulatedReply(userText: string): string {
 
 export default function ChatPage({ params }: { params: { id: string } }) {
   const router = useRouter();
-  const [messages, setMessages]   = useState<ChatMessage[]>(INITIAL_MESSAGES);
-  const [tbdItems, setTbdItems]   = useState<TBDItem[]>(INITIAL_TBDS);
-  const [input, setInput]         = useState("");
-  const [isLoading, setIsLoading] = useState(false);
+  const [messages, setMessages]     = useState<ChatMessage[]>(INITIAL_MESSAGES);
+  const [localStatuses, setLocalStatuses] = useState<Record<string, TBDAction>>({});
+  const [input, setInput]           = useState("");
+  const [isLoading, setIsLoading]   = useState(false);
   const [generating, setGenerating] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const bottomRef   = useRef<HTMLDivElement>(null);
 
+  const { data: remoteTbds } = useQuery({
+    queryKey: ["tbds", params.id],
+    queryFn: async () => {
+      const { data, error } = await getTBDs(params.id);
+      if (error) throw new Error(String(error));
+      return (data ?? []).map((t) => ({
+        id: t.id,
+        title: t.question,
+        desc: t.question,
+        level: TBD_LEVEL_LABELS[t.level] ?? "Explicit TBD",
+        status: "open" as TBDAction,
+      }));
+    },
+  });
+
+  const tbdItems: TBDItem[] = (remoteTbds ?? []).map((t) => ({
+    ...t,
+    status: localStatuses[t.id] ?? t.status,
+  }));
+
   const outstandingTbds = tbdItems.filter((t) => t.status === "open").length;
-  const allTbdsResolved = outstandingTbds === 0;
+  const allTbdsResolved = tbdItems.length === 0 || outstandingTbds === 0;
 
   // Auto-scroll on new messages
   useEffect(() => {
@@ -105,7 +102,7 @@ export default function ChatPage({ params }: { params: { id: string } }) {
     setMessages((prev) => [...prev, userMsg]);
     setIsLoading(true);
 
-    // TODO (Epic 4): POST /api/v1/projects/{id}/chat with { message: text }
+    // Chat endpoint not yet implemented — simulated for now
     await new Promise((res) => setTimeout(res, 1200));
     const aiMsg: ChatMessage = {
       id: String(Date.now() + 1),
@@ -118,14 +115,19 @@ export default function ChatPage({ params }: { params: { id: string } }) {
   }
 
   function handleTBDAction(id: string, action: TBDAction) {
-    setTbdItems((prev) => prev.map((t) => t.id === id ? { ...t, status: action } : t));
-    // TODO (Epic 4): POST /api/v1/projects/{id}/clarifications { tbd_id, action }
+    setLocalStatuses((prev) => ({ ...prev, [id]: action }));
+    submitClarification(params.id, id, action).catch(() => {
+      // Fire-and-forget; local state already updated
+    });
   }
 
   async function handleGenerateProposal() {
     setGenerating(true);
-    // TODO (Epic 4): POST /api/v1/projects/{id}/proposal
-    await new Promise((res) => setTimeout(res, 1500));
+    try {
+      await generateProposal(params.id);
+    } catch {
+      // Non-fatal — navigate regardless
+    }
     router.push(getNextPhaseRoute("chat", params.id));
   }
 

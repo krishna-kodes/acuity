@@ -7,8 +7,11 @@ export const apiClient = createClient<paths>({
 
 // ── Projects ────────────────────────────────────────────────────────────────
 
-export const createProject = (name: string) =>
-  apiClient.POST("/api/v1/projects", { body: { name } })
+export const listProjects = () =>
+  apiClient.GET("/api/v1/projects", {})
+
+export const createProject = (name: string, domain?: string) =>
+  apiClient.POST("/api/v1/projects", { body: { name, domain } })
 
 export const uploadDocument = (projectId: string, file: File) => {
   const form = new FormData()
@@ -22,6 +25,20 @@ export const uploadDocument = (projectId: string, file: File) => {
 export const getTBDs = (projectId: string) =>
   apiClient.GET("/api/v1/projects/{project_id}/tbds", {
     params: { path: { project_id: projectId } },
+  })
+
+export const getRedactionDecisions = (projectId: string) =>
+  apiClient.GET("/api/v1/projects/{project_id}/redaction-decisions", {
+    params: { path: { project_id: projectId } },
+  })
+
+export const patchRedactionDecisions = (
+  projectId: string,
+  decisions: Array<{ detection_id: number; confirmed: boolean }>,
+) =>
+  apiClient.PATCH("/api/v1/projects/{project_id}/redaction-decisions", {
+    params: { path: { project_id: projectId } },
+    body: { decisions },
   })
 
 export const submitClarification = (

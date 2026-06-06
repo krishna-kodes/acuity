@@ -1,49 +1,62 @@
 "use client";
 
-import { useState, useEffect } from "react";
 import Link from "next/link";
+import { useQuery } from "@tanstack/react-query";
 import { ProjectCard } from "@/components/project-card";
 import { MetricsStatCard } from "@/components/metrics-stat-card";
 import { DashboardSkeleton, ErrorBanner, EmptyState } from "@/components/page-states";
-import type { ProjectCardProps } from "@/components/project-card";
+import { listProjects } from "@/lib/api";
 
-// Placeholder data — replaced by API call in Epic 4
-const MOCK_PROJECTS: ProjectCardProps[] = [
-  { id: "proj_001", name: "E-Commerce Platform Rewrite", domain: "Retail",           phase: "chat",      syncStatus: "synced",  updated: "2 hours ago" },
-  { id: "proj_002", name: "Internal HR Portal",          domain: "Human Resources",  phase: "epics",     syncStatus: "pending", updated: "Yesterday" },
-  { id: "proj_003", name: "Mobile Banking App",          domain: "FinTech",          phase: "estimation",syncStatus: "failed",  updated: "3 days ago" },
-  { id: "proj_004", name: "Data Analytics Dashboard",    domain: "Internal Tools",   phase: "ingestion",                        updated: "1 week ago" },
-];
+const PHASE_ROUTES: Record<number, string> = {
+  1: "redaction",
+  2: "chat",
+  3: "techstack",
+  4: "team",
+  5: "estimation",
+  6: "epics",
+  7: "metrics",
+};
 
-type LoadState = "loading" | "loaded" | "error" | "empty";
+function phaseRoute(phaseNum: number): string {
+  return PHASE_ROUTES[phaseNum] ?? "redaction";
+}
+
+function timeAgo(isoDate: string): string {
+  const diff = Date.now() - new Date(isoDate).getTime();
+  const mins = Math.floor(diff / 60_000);
+  if (mins < 60) return mins <= 1 ? "Just now" : `${mins} minutes ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return hrs === 1 ? "1 hour ago" : `${hrs} hours ago`;
+  const days = Math.floor(hrs / 24);
+  return days === 1 ? "Yesterday" : `${days} days ago`;
+}
 
 export default function DashboardPage() {
-  const [loadState, setLoadState] = useState<LoadState>("loading");
-  const [error, setError]         = useState<string | null>(null);
-  const projects = loadState === "empty" ? [] : MOCK_PROJECTS;
+  const { data, isLoading, isError, error, refetch } = useQuery({
+    queryKey: ["projects"],
+    queryFn: async () => {
+      const { data, error } = await listProjects();
+      if (error) throw new Error(String(error));
+      return data ?? [];
+    },
+  });
 
-  // TODO (Epic 4): replace with real API fetch
-  useEffect(() => {
-    const timer = setTimeout(() => setLoadState("loaded"), 600);
-    return () => clearTimeout(timer);
-  }, []);
+  if (isLoading) return <DashboardSkeleton />;
 
-  function retry() {
-    setError(null);
-    setLoadState("loading");
-    setTimeout(() => setLoadState("loaded"), 600);
-  }
-
-  if (loadState === "loading") return <DashboardSkeleton />;
-
+  const projects = data ?? [];
   const totalCount  = projects.length;
-  const activeCount = projects.filter((p) => p.phase !== "synced").length;
-  const syncedCount = projects.filter((p) => p.syncStatus === "synced").length;
+  const activeCount = projects.filter((p) => p.status === "active").length;
+  const syncedCount = projects.filter((p) => p.current_phase >= 6).length;
 
   return (
     <div className="px-6 py-8 max-w-5xl mx-auto flex flex-col gap-6">
 
-      {error && <ErrorBanner message={error} onRetry={retry} />}
+      {isError && (
+        <ErrorBanner
+          message={error instanceof Error ? error.message : "Failed to load projects"}
+          onRetry={() => refetch()}
+        />
+      )}
 
       {/* Stats row */}
       <div className="grid grid-cols-3 gap-3">
@@ -92,8 +105,18 @@ export default function DashboardPage() {
         ) : (
           <div>
             {projects.map((project) => (
-              <Link key={project.id} href={`/projects/${project.id}/redaction`} className="block">
-                <ProjectCard {...project} />
+              <Link
+                key={project.id}
+                href={`/projects/${project.id}/${phaseRoute(project.current_phase)}`}
+                className="block"
+              >
+                <ProjectCard
+                  id={project.id}
+                  name={project.name}
+                  domain={project.domain ?? ""}
+                  phase={phaseRoute(project.current_phase)}
+                  updated={timeAgo(project.created_at)}
+                />
               </Link>
             ))}
           </div>
