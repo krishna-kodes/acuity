@@ -10,8 +10,8 @@ Closes #<!-- add all epic issue numbers, e.g. Closes #1, #2, #3 -->
 - 
 
 ## Dependency check
-- [ ] The epic this work depends on is merged to `dev` (or this is Epic 0 / an early-start task)
-- [ ] I pulled latest `dev` and rebased this branch before opening the PR
+- [ ] The epic this work depends on is merged to `main` (or this is Epic 0 / an early-start task)
+- [ ] I pulled latest `main` and rebased this branch before opening the PR
 - [ ] I checked for new issues opened by the other dev that could affect this work
 
 ## Testing

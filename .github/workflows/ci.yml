@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  frontend:
+    name: Frontend checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check if frontend exists
+        id: fe_exists
+        run: echo "exists=$([ -f frontend/package.json ] && echo true || echo false)" >> $GITHUB_OUTPUT
+
+      - uses: actions/setup-node@v4
+        if: steps.fe_exists.outputs.exists == 'true'
+        with:
+          node-version-file: '.nvmrc'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        if: steps.fe_exists.outputs.exists == 'true'
+        working-directory: frontend
+        run: npm ci
+
+      - name: Type check
+        if: steps.fe_exists.outputs.exists == 'true'
+        working-directory: frontend
+        run: npx tsc --noEmit
+
+      - name: Lint
+        if: steps.fe_exists.outputs.exists == 'true'
+        working-directory: frontend
+        run: npm run lint
+
+  backend:
+    name: Backend checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check if backend exists
+        id: be_exists
+        run: echo "exists=$([ -f backend/requirements.txt ] && echo true || echo false)" >> $GITHUB_OUTPUT
+
+      - uses: actions/setup-python@v5
+        if: steps.be_exists.outputs.exists == 'true'
+        with:
+          python-version-file: '.python-version'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        if: steps.be_exists.outputs.exists == 'true'
+        working-directory: backend
+        run: pip install -r requirements.txt
+
+      - name: Ruff lint
+        if: steps.be_exists.outputs.exists == 'true'
+        working-directory: backend
+        run: ruff check .
+
+      - name: Type check
+        if: steps.be_exists.outputs.exists == 'true'
+        working-directory: backend
+        run: mypy .
+
+      - name: Tests
+        if: steps.be_exists.outputs.exists == 'true'
+        working-directory: backend
+        run: pytest
