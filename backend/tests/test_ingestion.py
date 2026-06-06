@@ -159,3 +159,63 @@ async def test_chunk_section_hint_propagates():
     non_headers = [c for c in chunks if c.detected_type != "header"]
     assert len(non_headers) > 0, "Expected at least one non-header chunk"
     assert all(c.section_hint == "2. Functional Requirements" for c in non_headers)
+
+
+# ── Embedder tests ───────────────────────────────────────────────────────────
+
+def test_collection_exists_false(tmp_path, monkeypatch):
+    """Returns False when the project has no embeddings yet."""
+    monkeypatch.setenv("CHROMA_PERSIST_PATH", str(tmp_path))
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    with patch("app.services.embedder.OpenAIEmbeddingFunction"):
+        from app.services.embedder import collection_exists
+        assert collection_exists("new_project") is False
+
+
+@pytest.mark.asyncio
+async def test_embed_and_store_calls_upsert(tmp_path, monkeypatch):
+    """embed_and_store calls collection.upsert with correct metadata keys."""
+    monkeypatch.setenv("CHROMA_PERSIST_PATH", str(tmp_path))
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    from app.services.ingestion import Chunk
+
+    chunks = [
+        Chunk(
+            text="The system shall support OAuth 2.0.",
+            chunk_index=0,
+            project_id="42",
+            detected_type="paragraph",
+            page_number=1,
+            section_hint="2. Auth",
+            token_count=10,
+        )
+    ]
+
+    mock_collection = MagicMock()
+    mock_collection.upsert = MagicMock()
+
+    with patch("app.services.embedder.chromadb.PersistentClient") as mock_client, \
+         patch("app.services.embedder.OpenAIEmbeddingFunction"):
+        mock_client.return_value.get_or_create_collection.return_value = mock_collection
+
+        from app.services.embedder import embed_and_store
+        stored = await embed_and_store(chunks)
+
+    assert stored == 1
+    mock_collection.upsert.assert_called_once()
+    call_kwargs = mock_collection.upsert.call_args
+    metadata = call_kwargs.kwargs["metadatas"][0]
+    assert metadata["project_id"] == "42"
+    assert metadata["detected_type"] == "paragraph"
+    assert metadata["section_hint"] == "2. Auth"
+    assert metadata["token_count"] == 10
+
+
+@pytest.mark.asyncio
+async def test_embed_and_store_empty_returns_zero():
+    """embed_and_store with empty list returns 0 without calling ChromaDB."""
+    from app.services.embedder import embed_and_store
+    result = await embed_and_store([])
+    assert result == 0
