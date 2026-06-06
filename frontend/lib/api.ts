@@ -81,3 +81,27 @@ export const seedAll = () =>
 
 export const resetDb = () =>
   apiClient.DELETE("/api/v1/factory/reset-db", {})
+
+// ── Project CRUD (Epic 5) ─────────────────────────────────────────────────────
+// NOTE: GET /api/v1/projects and GET /api/v1/projects/{project_id} are not yet
+// implemented in the backend (Epic 5 only exposes POST /api/v1/projects).
+// These helpers will be added once the backend routes are live and regenerated.
+
+// ── Redaction / PII review (Epic 5) ──────────────────────────────────────────
+// NOTE: /api/v1/projects/{project_id}/redaction-decisions is not yet implemented
+// in the backend. Helper will be added after the backend route is live.
+
+// ── Phase triggers (Epic 5) ───────────────────────────────────────────────────
+// NOTE: /api/v1/projects/{project_id}/phases/{phase_number}/start is not yet
+// implemented in the backend. Helper will be added after the backend route is live.
+
+// ── Phase result GETs (Epic 5) ────────────────────────────────────────────────
+// NOTE: GET variants for /stack, /team, /estimate, and /epics are not yet
+// implemented in the backend. The current backend exposes these as POST-only
+// trigger endpoints (suggestStack, estimateEffort above).
+// Helpers will be added once the backend GET routes are live and types are regenerated.
+
+// ── DOCX export (binary — use URL directly) ───────────────────────────────────
+
+export const getProposalExportUrl = (projectId: string): string =>
+  `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"}/api/v1/projects/${projectId}/export/proposal`
