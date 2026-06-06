@@ -311,7 +311,10 @@ export interface components {
     schemas: {
         /** Body_upload_document_api_v1_projects__project_id__documents_post */
         Body_upload_document_api_v1_projects__project_id__documents_post: {
-            /** File */
+            /**
+             * File
+             * Format: binary
+             */
             file: string;
         };
         /** ClarificationCreate */
@@ -501,10 +504,6 @@ export interface components {
             msg: string;
             /** Error Type */
             type: string;
-            /** Input */
-            input?: unknown;
-            /** Context */
-            ctx?: Record<string, never>;
         };
     };
     responses: never;
