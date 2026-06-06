@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { PhaseProgressStepper } from "@/components/phase-progress-stepper";
+import { ReviewPageSkeleton, ErrorBanner } from "@/components/page-states";
 import { cn } from "@/lib/utils";
 import type { Phase } from "@/components/phase-progress-stepper";
 
@@ -47,7 +48,19 @@ const CATEGORY_COLORS: Record<string, string> = {
 
 export default function TechStackPage({ params }: { params: { id: string } }) {
   const router = useRouter();
+  const [loading, setLoading]   = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
   const [proceeding, setProceeding] = useState(false);
+
+  // TODO (Epic 4): replace with GET /api/v1/projects/{id}/stack
+  useEffect(() => { const t = setTimeout(() => setLoading(false), 500); return () => clearTimeout(t); }, []);
+
+  if (loading) return <ReviewPageSkeleton />;
+  if (fetchError) return (
+    <div className="px-6 py-8 max-w-4xl mx-auto">
+      <ErrorBanner message={fetchError} onRetry={() => { setFetchError(null); setLoading(true); setTimeout(() => setLoading(false), 500); }} />
+    </div>
+  );
 
   async function handleProceed() {
     setProceeding(true);
