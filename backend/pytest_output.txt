@@ -1,0 +1,53 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.11.14, pytest-8.2.0, pluggy-1.6.0 -- /Users/krishna/Projects/acuity/backend/.venv/bin/python
+cachedir: .pytest_cache
+rootdir: /Users/krishna/Projects/acuity/backend
+configfile: pyproject.toml
+plugins: anyio-4.13.0
+collecting ... collected 43 items
+
+tests/test_health.py::test_health PASSED                                 [  2%]
+tests/test_openapi.py::test_route_present_in_openapi[/api/v1/projects-post] PASSED [  4%]
+tests/test_openapi.py::test_route_present_in_openapi[/api/v1/projects/{project_id}/documents-post] PASSED [  6%]
+tests/test_openapi.py::test_route_present_in_openapi[/api/v1/projects/{project_id}/tbds-get] PASSED [  9%]
+tests/test_openapi.py::test_route_present_in_openapi[/api/v1/projects/{project_id}/clarifications-post] PASSED [ 11%]
+tests/test_openapi.py::test_route_present_in_openapi[/api/v1/projects/{project_id}/proposal-post] PASSED [ 13%]
+tests/test_openapi.py::test_route_present_in_openapi[/api/v1/projects/{project_id}/proposal-get] PASSED [ 16%]
+tests/test_openapi.py::test_route_present_in_openapi[/api/v1/projects/{project_id}/stack-post] PASSED [ 18%]
+tests/test_openapi.py::test_route_present_in_openapi[/api/v1/projects/{project_id}/estimate-post] PASSED [ 20%]
+tests/test_openapi.py::test_route_present_in_openapi[/api/v1/projects/{project_id}/sync-post] PASSED [ 23%]
+tests/test_openapi.py::test_route_present_in_openapi[/api/v1/projects/{project_id}/metrics-get] PASSED [ 25%]
+tests/test_openapi.py::test_route_present_in_openapi[/api/v1/factory/seed-employees-post] PASSED [ 27%]
+tests/test_openapi.py::test_route_present_in_openapi[/api/v1/factory/seed-projects-post] PASSED [ 30%]
+tests/test_openapi.py::test_route_present_in_openapi[/api/v1/factory/seed-technologies-post] PASSED [ 32%]
+tests/test_openapi.py::test_route_present_in_openapi[/api/v1/factory/seed-all-post] PASSED [ 34%]
+tests/test_openapi.py::test_route_present_in_openapi[/api/v1/factory/reset-db-delete] PASSED [ 37%]
+tests/test_openapi.py::test_openapi_title PASSED                         [ 39%]
+tests/test_openapi.py::test_all_api_routes_have_summaries PASSED         [ 41%]
+tests/test_routes.py::test_endpoint_returns_2xx[POST-/api/v1/projects-body0] PASSED [ 44%]
+tests/test_routes.py::test_endpoint_returns_2xx[GET-/api/v1/projects/stub-id/tbds-None] PASSED [ 46%]
+tests/test_routes.py::test_endpoint_returns_2xx[POST-/api/v1/projects/stub-id/clarifications-body2] PASSED [ 48%]
+tests/test_routes.py::test_endpoint_returns_2xx[POST-/api/v1/projects/stub-id/proposal-None] PASSED [ 51%]
+tests/test_routes.py::test_endpoint_returns_2xx[GET-/api/v1/projects/stub-id/proposal-None] PASSED [ 53%]
+tests/test_routes.py::test_endpoint_returns_2xx[POST-/api/v1/projects/stub-id/stack-None] PASSED [ 55%]
+tests/test_routes.py::test_endpoint_returns_2xx[POST-/api/v1/projects/stub-id/estimate-None] PASSED [ 58%]
+tests/test_routes.py::test_endpoint_returns_2xx[POST-/api/v1/projects/stub-id/sync-None] PASSED [ 60%]
+tests/test_routes.py::test_endpoint_returns_2xx[GET-/api/v1/projects/stub-id/metrics-None] PASSED [ 62%]
+tests/test_routes.py::test_endpoint_returns_2xx[POST-/api/v1/factory/seed-employees-None] PASSED [ 65%]
+tests/test_routes.py::test_endpoint_returns_2xx[POST-/api/v1/factory/seed-projects-None] PASSED [ 67%]
+tests/test_routes.py::test_endpoint_returns_2xx[POST-/api/v1/factory/seed-technologies-None] PASSED [ 69%]
+tests/test_routes.py::test_endpoint_returns_2xx[POST-/api/v1/factory/seed-all-None] PASSED [ 72%]
+tests/test_routes.py::test_endpoint_returns_2xx[DELETE-/api/v1/factory/reset-db-None] PASSED [ 74%]
+tests/test_routes.py::test_upload_document PASSED                        [ 76%]
+tests/test_routes.py::test_create_project_returns_name PASSED            [ 79%]
+tests/test_routes.py::test_sync_response_has_status PASSED               [ 81%]
+tests/test_routes.py::test_factory_reset_returns_status PASSED           [ 83%]
+tests/test_schemas.py::test_project_create_fields PASSED                 [ 86%]
+tests/test_schemas.py::test_project_response_fields PASSED               [ 88%]
+tests/test_schemas.py::test_tbd_item_fields PASSED                       [ 90%]
+tests/test_schemas.py::test_sync_status_values PASSED                    [ 93%]
+tests/test_schemas.py::test_clarification_create_optional_answer PASSED  [ 95%]
+tests/test_schemas.py::test_tech_stack_response_fields PASSED            [ 97%]
+tests/test_schemas.py::test_estimation_response_fields PASSED            [100%]
+
+============================== 43 passed in 0.07s ==============================

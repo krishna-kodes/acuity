@@ -1,7 +1,9 @@
-from fastapi import APIRouter, Depends, File, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, UploadFile
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.models.enums import DocumentStatus
+from app.models.project import Document
 from app.schemas.clarification import ClarificationCreate, ClarificationResponse
 from app.schemas.document import DocumentResponse
 from app.schemas.metrics import MetricsResponse
@@ -13,7 +15,8 @@ from app.schemas.project import (
     TechStackResponse,
 )
 from app.schemas.proposal import ProposalResponse
-from app.schemas.sync import SyncResponse, SyncStatus
+from app.schemas.sync import SyncResponse
+from app.services.ingestion import ingest_document
 
 router = APIRouter(tags=["projects"])
 
@@ -33,19 +36,44 @@ def create_project(
     )
 
 
-@router.post("/projects/{project_id}/documents", response_model=DocumentResponse, status_code=201)
-def upload_document(
+@router.post(
+    "/projects/{project_id}/documents",
+    summary="Upload requirements document",
+    response_model=DocumentResponse,
+    status_code=201,
+)
+async def upload_document(
     project_id: str,
     file: UploadFile = File(...),
+    background_tasks: BackgroundTasks = BackgroundTasks(),
     db: Session = Depends(get_db),
 ) -> DocumentResponse:
-    # TODO(Epic 5 #38): run PII detection and store document
-    return DocumentResponse(
-        id="stub-doc-id",
-        project_id=project_id,
+    import os
+    os.makedirs("documents", exist_ok=True)
+    file_path = f"documents/{project_id}_{file.filename}"
+    content = await file.read()
+    with open(file_path, "wb") as f:
+        f.write(content)
+
+    doc = Document(
+        project_id=int(project_id),
         filename=file.filename or "unknown",
-        status="uploaded",
-        upload_ts="2026-01-01T00:00:00Z",
+        status=DocumentStatus.uploaded,
+    )
+    db.add(doc)
+    db.commit()
+    db.refresh(doc)
+
+    background_tasks.add_task(
+        ingest_document, doc.id, int(project_id), file_path, db
+    )
+
+    return DocumentResponse(
+        id=str(doc.id),
+        project_id=project_id,
+        filename=doc.filename,
+        status=doc.status.value,
+        upload_ts=str(doc.upload_ts),
     )
 
 

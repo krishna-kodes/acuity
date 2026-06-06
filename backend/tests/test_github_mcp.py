@@ -11,7 +11,6 @@ import app.mcp.github_server as gh_server
 from app.schemas.sync import SyncStatus
 from app.services.github_sync import sync_epics_to_github
 
-
 MILESTONE_PAYLOAD = {
     "number": 1,
     "title": "Epic 1",
