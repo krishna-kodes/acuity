@@ -20,6 +20,15 @@ epic/6-integration         (both)
 - `dev` → `main` merges happen at integration milestones (end of Epic 3, end of Epic 6).
 - Branch names must match the pattern above exactly — CI and PR templates reference them.
 
+## Before starting an epic or task
+
+Run through this checklist before writing any code:
+
+- [ ] **Dependency merged?** Check that the epic this work depends on is merged to `dev` (see dependency map below). If not, wait or coordinate with the other dev.
+- [ ] **Rebase from `dev`:** `git checkout dev && git pull && git checkout -b epic/<n>-<name>` (new branch) or `git rebase dev` (existing branch).
+- [ ] **Review new issues:** Scan for any `frontend` or `backend` issues opened by the other dev since your last sync — they may affect your work.
+- [ ] **Confirm sync points verbally:** Before starting Epic 4 T4–T5 (#33–34) or Epic 6 (#41–45), confirm with the other dev that their blocking epic is merged and stable — don't rely on GitHub alone.
+
 ## Workflow
 
 1. Branch from `dev`: `git checkout dev && git pull && git checkout -b epic/<n>-<name>`

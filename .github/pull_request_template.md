@@ -1,18 +1,24 @@
 ## Summary
 Describe the change and why it was made.
 
-## Related issue
-Link to the relevant issue or epic.
+## Related issues
+Closes #<!-- add all epic issue numbers, e.g. Closes #1, #2, #3 -->
 
 ## Changes
 - 
 - 
 - 
 
+## Dependency check
+- [ ] The epic this work depends on is merged to `dev` (or this is Epic 0 / an early-start task)
+- [ ] I pulled latest `dev` and rebased this branch before opening the PR
+- [ ] I checked for new issues opened by the other dev that could affect this work
+
 ## Testing
-- 
-- 
+- [ ] `npx tsc --noEmit` passes (frontend)
+- [ ] `npm run lint` passes (frontend)
+- [ ] `pytest` passes (backend)
+- [ ] Manually verified the change works as expected
 
 ## Notes
-- Use the issue templates in `.github/ISSUE_TEMPLATE/` for new work.
-- Confirm whether this PR is frontend-first or backend follow-on work.
+Any context the reviewer needs — gotchas, follow-up issues, decisions made.
