@@ -5,17 +5,8 @@ import { PhaseProgressStepper } from "@/components/phase-progress-stepper";
 import { MetricsStatCard } from "@/components/metrics-stat-card";
 import { MetricsLineChart } from "@/components/metrics-line-chart";
 import { MetricsBarChart } from "@/components/metrics-bar-chart";
-import type { Phase } from "@/components/phase-progress-stepper";
+import { getPhasesForRoute } from "@/lib/project-phases";
 import { cn } from "@/lib/utils";
-
-const PHASES: Phase[] = [
-  { label: "Ingestion",    status: "complete" },
-  { label: "Refinement",   status: "complete" },
-  { label: "Tech Stack",   status: "complete" },
-  { label: "Team",         status: "complete" },
-  { label: "Estimation",   status: "complete" },
-  { label: "Epics & Sync", status: "complete" },
-];
 
 // ── Mock data ────────────────────────────────────────────────────────────────
 // TODO (Epic 4): fetch from GET /api/v1/projects/{id}/metrics
@@ -252,7 +243,7 @@ export default function MetricsPage({ params: _ }: { params: { id: string } }) {
 
   return (
     <div className="px-6 py-8 max-w-4xl mx-auto flex flex-col gap-6">
-      <PhaseProgressStepper phases={PHASES} />
+      <PhaseProgressStepper phases={getPhasesForRoute("metrics")} />
 
       {/* Tab bar */}
       <div className="flex gap-1 p-1 bg-surface-subtle border border-border rounded-lg overflow-x-auto">

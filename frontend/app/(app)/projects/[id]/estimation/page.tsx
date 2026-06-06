@@ -4,17 +4,8 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { PhaseProgressStepper } from "@/components/phase-progress-stepper";
 import { MetricsStatCard } from "@/components/metrics-stat-card";
+import { getPhasesForRoute, getNextPhaseRoute } from "@/lib/project-phases";
 import { cn } from "@/lib/utils";
-import type { Phase } from "@/components/phase-progress-stepper";
-
-const PHASES: Phase[] = [
-  { label: "Ingestion",    status: "complete" },
-  { label: "Refinement",   status: "complete" },
-  { label: "Tech Stack",   status: "complete" },
-  { label: "Team",         status: "complete" },
-  { label: "Estimation",   status: "in_progress" },
-  { label: "Epics & Sync", status: "locked" },
-];
 
 interface EstimateRow {
   area: string;
@@ -55,12 +46,12 @@ export default function EstimationPage({ params }: { params: { id: string } }) {
     setProceeding(true);
     // TODO (Epic 4): POST /api/v1/projects/{id}/phases/6/start
     await new Promise((res) => setTimeout(res, 800));
-    router.push(`/projects/${params.id}/epics`);
+    router.push(getNextPhaseRoute("estimation", params.id));
   }
 
   return (
     <div className="px-6 py-8 max-w-4xl mx-auto flex flex-col gap-6">
-      <PhaseProgressStepper phases={PHASES} />
+      <PhaseProgressStepper phases={getPhasesForRoute("estimation")} />
 
       <div className="flex flex-col gap-4">
         <div>

@@ -5,19 +5,10 @@ import { PhaseProgressStepper } from "@/components/phase-progress-stepper";
 import { EpicTaskListItem } from "@/components/epic-task-list-item";
 import { SyncStatusBadge } from "@/components/sync-status-badge";
 import { ErrorBanner } from "@/components/page-states";
-import type { Phase } from "@/components/phase-progress-stepper";
+import { getPhasesForRoute } from "@/lib/project-phases";
 import type { EpicItem } from "@/components/epic-task-list-item";
 import type { SyncStatus } from "@/components/sync-status-badge";
 import { cn } from "@/lib/utils";
-
-const PHASES: Phase[] = [
-  { label: "Ingestion",    status: "complete" },
-  { label: "Refinement",   status: "complete" },
-  { label: "Tech Stack",   status: "complete" },
-  { label: "Team",         status: "complete" },
-  { label: "Estimation",   status: "complete" },
-  { label: "Epics & Sync", status: "in_progress" },
-];
 
 // TODO (Epic 4): fetch from GET /api/v1/projects/{id}/epics
 const INITIAL_EPICS: EpicItem[] = [
@@ -164,7 +155,7 @@ export default function EpicsPage({ params }: { params: { id: string } }) {
 
   return (
     <div className="px-6 py-8 max-w-4xl mx-auto flex flex-col gap-6">
-      <PhaseProgressStepper phases={PHASES} />
+      <PhaseProgressStepper phases={getPhasesForRoute("epics")} />
 
       <div className="flex flex-col gap-4">
         {/* Header */}
