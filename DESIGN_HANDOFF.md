@@ -94,7 +94,10 @@ Charts: Recharts (line charts for trends, bar charts for per-phase breakdown, st
 | Epic 1 — App Shell | Root layout, (app) route group, sidebar + topbar, all 9 route stubs, project dashboard | ✅ Complete |
 | Epic 2 — Upload screen | `/projects/new` drag-drop upload | ✅ Complete |
 | Epic 3 — Phase screens | All 7 phase pages + phase transition lib | ✅ Complete |
-| Epic 4 — API integration | Fetch wrapper, API client, real data | ⏳ Pending |
+| Epic 4 — API integration | Fetch wrapper (`openapi-fetch`), typed API client, TanStack Query wiring | ✅ Complete |
+| Epic 5 — Backend implementation | T5 GitHub MCP sync tools done; T1 DB schema + T2 ChromaDB in progress (krishna-augment) | 🔄 In Progress |
+| W11 — Evals | 15 test cases, 18 graders, harness, CI gate (`eval_suite.py`) | ✅ Complete |
+| Epic 6 — E2E integration | Blocked on Epic 5 completion | ⏳ Pending |
 
 ---
 
