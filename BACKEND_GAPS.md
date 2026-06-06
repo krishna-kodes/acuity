@@ -6,32 +6,52 @@
 
 ---
 
+## Implementation Status (June 2026)
+
+**Epic 4 complete:** All 15 original spec endpoints exist as typed stubs at `/api/v1/`.  
+**Epic 5 in progress:** Document ingestion (phase 1, ChromaDB + chunking) and GitHub MCP sync tools are real implementations. LangGraph orchestration and phase transitions not yet implemented.
+
+### P0 Blockers for Frontend Integration (Epic 6)
+These endpoints must be fully implemented before the frontend can progress beyond the project creation screen:
+
+1. **`GET /api/v1/projects`** — Dashboard list endpoint (no list retrieval exists; only POST create + GET by ID)
+2. **`POST /api/v1/projects/{id}/chat`** — Phase 2 RAG message loop (not in original spec; critical for chat page)
+3. **`PATCH /api/v1/projects/{id}/redaction-decisions`** — Phase 1 redaction review completion (not in original spec)
+4. **`POST /api/v1/projects/{id}/phases/{n}/start` × 5** — Phase transition triggers (not in original spec; required for phase gating per ADR-008)
+
+### Implementation Road Map
+- **Issue #40** will address all P0 blockers above + P1 GET endpoints (`stack`, `team`, `estimate`, `epics`)
+- Document ingestion pipeline (Epic 5 T2) is production-ready
+- GitHub MCP sync tools (Epic 5 T5) are functional stubs awaiting Phase 6 epics
+
+---
+
 ## 1. API endpoints referenced by the frontend
 
 All routes below are called (or will be called) by the frontend. Cross-checked against CLAUDE.md §7.
 
-| Method | Endpoint | Frontend source | Status |
-|--------|----------|-----------------|--------|
-| POST | `/api/v1/projects` | `projects/new/page.tsx` | In spec |
-| POST | `/api/v1/projects/{id}/documents` | `projects/new/page.tsx` | In spec |
-| GET | `/api/v1/projects` | `(app)/page.tsx` (dashboard list) | **NEW** — not in CLAUDE.md |
-| GET | `/api/v1/projects/{id}/tbds` | `redaction/page.tsx`, `chat/page.tsx` | In spec |
-| PATCH | `/api/v1/projects/{id}/redaction-decisions` | `redaction/page.tsx` | **NEW** — CLAUDE.md has no PATCH route for redaction |
-| POST | `/api/v1/projects/{id}/phases/2/start` | `redaction/page.tsx` | **NEW** — phase-start routes not in spec |
-| POST | `/api/v1/projects/{id}/chat` | `chat/page.tsx` | **NEW** — no chat message route in spec |
-| POST | `/api/v1/projects/{id}/clarifications` | `chat/page.tsx` | In spec |
-| POST | `/api/v1/projects/{id}/proposal` | `chat/page.tsx` | In spec |
-| GET | `/api/v1/projects/{id}/stack` | `techstack/page.tsx` | **NEW** — spec only has POST |
-| POST | `/api/v1/projects/{id}/stack` | `techstack/page.tsx` | In spec (as "run tech stack suggestion") |
-| POST | `/api/v1/projects/{id}/phases/4/start` | `techstack/page.tsx` | **NEW** — phase-start routes not in spec |
-| GET | `/api/v1/projects/{id}/team` | `team/page.tsx` | **NEW** — spec has no GET team route |
-| POST | `/api/v1/projects/{id}/phases/5/start` | `team/page.tsx` | **NEW** — phase-start routes not in spec |
-| GET | `/api/v1/projects/{id}/estimate` | `estimation/page.tsx` | **NEW** — spec only has POST |
-| POST | `/api/v1/projects/{id}/phases/6/start` | `estimation/page.tsx` | **NEW** — phase-start routes not in spec |
-| GET | `/api/v1/projects/{id}/epics` | `epics/page.tsx` | **NEW** — spec has no GET epics route |
-| POST | `/api/v1/projects/{id}/sync` | `epics/page.tsx` | In spec |
-| GET | `/api/v1/projects/{id}/metrics` | `metrics/page.tsx` | In spec |
-| GET | `/api/v1/projects/{id}/export/proposal` | (no UI yet — gap D7) | In spec |
+| Method | Endpoint | Frontend source | Status | Implementation |
+|--------|----------|-----------------|--------|-----------------|
+| POST | `/api/v1/projects` | `projects/new/page.tsx` | In spec | Stub (Epic 4) — basic project creation exists |
+| POST | `/api/v1/projects/{id}/documents` | `projects/new/page.tsx` | In spec | **Real impl** (Epic 5 T2 — ChromaDB ingestion pipeline live) |
+| GET | `/api/v1/projects` | `(app)/page.tsx` (dashboard list) | **NEW** — not in CLAUDE.md | **P0 blocker** — not yet implemented |
+| GET | `/api/v1/projects/{id}/tbds` | `redaction/page.tsx`, `chat/page.tsx` | In spec | Stub — real impl pending #40 (LangGraph Phase 1) |
+| PATCH | `/api/v1/projects/{id}/redaction-decisions` | `redaction/page.tsx` | **NEW** — CLAUDE.md has no PATCH route for redaction | **P0 blocker** — not yet implemented |
+| POST | `/api/v1/projects/{id}/phases/2/start` | `redaction/page.tsx` | **NEW** — phase-start routes not in spec | **P0 blocker** — not yet implemented |
+| POST | `/api/v1/projects/{id}/chat` | `chat/page.tsx` | **NEW** — no chat message route in spec | **P0 blocker** — not yet implemented |
+| POST | `/api/v1/projects/{id}/clarifications` | `chat/page.tsx` | In spec | Stub — real impl pending #40 (LangGraph Phase 2) |
+| POST | `/api/v1/projects/{id}/proposal` | `chat/page.tsx` | In spec | Stub — real impl pending #40 (DOCX generation) |
+| GET | `/api/v1/projects/{id}/stack` | `techstack/page.tsx` | **NEW** — spec only has POST | Stub GET missing — pending #40 (Phase 3 retrieval) |
+| POST | `/api/v1/projects/{id}/stack` | `techstack/page.tsx` | In spec (as "run tech stack suggestion") | Stub — real impl pending #40 (LangGraph Phase 3) |
+| POST | `/api/v1/projects/{id}/phases/4/start` | `techstack/page.tsx` | **NEW** — phase-start routes not in spec | **P0 blocker** — not yet implemented |
+| GET | `/api/v1/projects/{id}/team` | `team/page.tsx` | **NEW** — spec has no GET team route | Stub GET missing — pending #40 (Phase 4 retrieval) |
+| POST | `/api/v1/projects/{id}/phases/5/start` | `team/page.tsx` | **NEW** — phase-start routes not in spec | **P0 blocker** — not yet implemented |
+| GET | `/api/v1/projects/{id}/estimate` | `estimation/page.tsx` | **NEW** — spec only has POST | Stub GET missing — pending #40 (Phase 5 retrieval) |
+| POST | `/api/v1/projects/{id}/phases/6/start` | `estimation/page.tsx` | **NEW** — phase-start routes not in spec | **P0 blocker** — not yet implemented |
+| GET | `/api/v1/projects/{id}/epics` | `epics/page.tsx` | **NEW** — spec has no GET epics route | Stub GET missing — pending #40 (Phase 6 retrieval) |
+| POST | `/api/v1/projects/{id}/sync` | `epics/page.tsx` | In spec | **Real impl** (Epic 5 T5 — GitHub MCP sync tools functional) |
+| GET | `/api/v1/projects/{id}/metrics` | `metrics/page.tsx` | In spec | Stub — real impl pending tracking across all phases |
+| GET | `/api/v1/projects/{id}/export/proposal` | (no UI yet — gap D7) | In spec | Stub — DOCX export pending #40 (python-docx) |
 
 ---
 

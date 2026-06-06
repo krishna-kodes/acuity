@@ -1,10 +1,20 @@
 # Epics and Tasks for Acuity
 
-## Priority note
-- **Epic 0 (Design System) is the first epic to implement** — all other frontend work depends on it.
-- Frontend build is the highest priority overall.
-- Backend work should begin only after the frontend app shell, route structure, and primary screens are defined.
-- Use this document to drive Claude-generated epics, tasks, and dependencies.
+## Status (June 2026)
+
+| Epic | Description | Status |
+|------|-------------|--------|
+| Epic 0 | Design system + component library | ✅ Complete |
+| Epic 1 | Frontend scaffolding + app shell | ✅ Complete |
+| Epic 2 | Frontend page implementation | ✅ Complete |
+| Epic 3 | Frontend polish + validation + backend gap analysis | ✅ Complete |
+| Epic 4 | Backend API scaffold + stub endpoints + typed client | ✅ Complete |
+| Epic 5 | Backend implementation + data persistence | 🔄 In progress |
+| Epic 6 | End-to-end integration + QA | ⏳ Pending |
+
+**Epic 5 remaining:** #37 LangGraph workflow, #38 PII detection, #40 real API endpoints
+
+**Epic 6 blocked until** Epics 3 + 5 are complete.
 
 ## Epic 0: Design system and component library (Claude Design → code)
 

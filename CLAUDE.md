@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-> **Source code has not yet been added.** This file documents the planned architecture and locked decisions. Update the Commands section once scaffolding exists.
+> **Implementation status (June 2026):** Frontend (Next.js 16.2, Tailwind v4) through Epics 0–3 complete. Backend: FastAPI scaffold, SQLite schema (17 tables + Alembic), ChromaDB ingestion pipeline, GitHub MCP sync, eval harness all done. Epic 5 in progress (LangGraph, PII).
 
 > **Design document overrides:** `capstone_project_design_document.md` is the original submission artifact and has not been updated. Where it conflicts with this file, **this file wins**:
 > - **Embedding model:** Design doc says `Gemini text-embedding-004` — overridden by ADR-004. Use `text-embedding-3-small` (OpenAI, 1536 dims).
@@ -29,12 +29,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Commands
 
-> Commands below reflect the planned stack. Update with real paths once scaffolding is added.
-
 ### Backend
 ```bash
+# Run from backend/
+cd backend
+
+# Create and activate venv (first time)
+python -m venv .venv
+source .venv/bin/activate   # or .venv\Scripts\activate on Windows
+
 # Install dependencies
-pip install -r requirements.txt
+pip install -r requirements-dev.txt
 
 # Run dev server
 uvicorn app.main:app --reload --port 8000
@@ -60,6 +65,9 @@ python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().d
 
 ### Frontend
 ```bash
+# Run from frontend/
+cd frontend
+
 # Install dependencies
 npm install
 
@@ -137,12 +145,12 @@ Phase transitions are PM-initiated ("Proceed" button). Phase N cannot start unti
 
 | Layer | Technology |
 |-------|-----------|
-| Frontend | Next.js 14+ App Router, Tailwind CSS, shadcn/ui, Recharts (metrics only) |
+| Frontend | Next.js 16.2, Tailwind CSS v4 (`@theme` in `globals.css`), shadcn/ui, Recharts (metrics only) |
 | Backend | FastAPI + Uvicorn |
 | ORM / DB | SQLAlchemy + SQLite + Alembic |
 | Vector DB | ChromaDB `PersistentClient` |
-| LLM (main) | Gemini via `MAIN_LLM_PROVIDER` env var (switchable to Anthropic) |
-| LLM (fast) | Gemini Flash / Nano — query rewriting, LLM-as-judge |
+| LLM (main) | Gemini 2.5 Pro via `google-genai` SDK (`langchain-google-genai`) — switchable via `MAIN_LLM_PROVIDER` |
+| LLM (fast) | Gemini 2.5 Flash — query rewriting, LLM-as-judge |
 | LLM (structured) | Claude Sonnet — estimation + epic generation (Phase 5–6) |
 | Embeddings | `text-embedding-3-small`, 1536 dims, cosine distance |
 | Sparse retrieval | BM25 (rank-bm25) — merged with dense results before reranker |
