@@ -4,6 +4,7 @@ import { useState } from "react";
 import { PhaseProgressStepper } from "@/components/phase-progress-stepper";
 import { EpicTaskListItem } from "@/components/epic-task-list-item";
 import { SyncStatusBadge } from "@/components/sync-status-badge";
+import { ErrorBanner } from "@/components/page-states";
 import type { Phase } from "@/components/phase-progress-stepper";
 import type { EpicItem } from "@/components/epic-task-list-item";
 import type { SyncStatus } from "@/components/sync-status-badge";
@@ -194,12 +195,7 @@ export default function EpicsPage({ params }: { params: { id: string } }) {
 
         {/* Error */}
         {syncError && (
-          <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg bg-destructive-subtle border border-destructive/20 text-xs text-destructive">
-            <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 16 16" stroke="currentColor" strokeWidth={2}>
-              <circle cx="8" cy="8" r="6" /><path d="M8 5v3.5M8 10v.5" strokeLinecap="round" />
-            </svg>
-            {syncError}
-          </div>
+          <ErrorBanner message={syncError} onRetry={() => { setSyncError(null); setSyncState("idle"); }} />
         )}
 
         {/* Sync action */}
