@@ -192,3 +192,34 @@ export const deleteProposal = (projectId: string, proposalId: string) =>
     `${_apiBase()}/api/v1/projects/${projectId}/proposals/${proposalId}`,
     { method: "DELETE" }
   )
+
+// ── Admin ──────────────────────────────────────────────────────────────────
+
+export interface AdminSkill {
+  id: number
+  name: string
+  category: string
+}
+
+export interface AdminEmployee {
+  id: number
+  name: string
+  email: string | null
+  seniority: string
+  availability_pct: number
+  joined_at: string | null
+  status: string
+  skills: AdminSkill[]
+}
+
+export async function listAdminEmployees(): Promise<AdminEmployee[]> {
+  const res = await fetch(`${_apiBase()}/api/v1/admin/employees`)
+  if (!res.ok) throw new Error(`Failed to fetch employees: ${res.status}`)
+  return res.json()
+}
+
+export async function listAdminSkills(): Promise<AdminSkill[]> {
+  const res = await fetch(`${_apiBase()}/api/v1/admin/skills`)
+  if (!res.ok) throw new Error(`Failed to fetch skills: ${res.status}`)
+  return res.json()
+}
