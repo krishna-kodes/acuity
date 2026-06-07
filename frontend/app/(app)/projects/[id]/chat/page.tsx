@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, use } from "react";
 import { useRouter } from "next/navigation";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { PhaseProgressStepper } from "@/components/phase-progress-stepper";
 import { ChatThread } from "@/components/chat-thread";
 import { TBDClarificationWidget } from "@/components/tbd-clarification-widget";
@@ -32,6 +32,7 @@ const TBD_LEVEL_LABELS: Record<number, TBDItem["level"]> = {
 export default function ChatPage({ params }: { params: Promise<{ id: string }> }) {
   const { id: projectId } = use(params);
   const router = useRouter();
+  const queryClient = useQueryClient();
   const [messages, setMessages]     = useState<ChatMessage[]>(INITIAL_MESSAGES);
   const [localStatuses, setLocalStatuses] = useState<Record<string, TBDAction>>({});
   const [input, setInput]           = useState("");
@@ -54,7 +55,7 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
         status: "open" as TBDAction,
       }));
     },
-    staleTime: 30_000,
+    staleTime: Infinity,
     refetchOnWindowFocus: false,
   });
 
@@ -135,6 +136,8 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
             setMessages((prev) =>
               prev.map((m) => m.id === aiId ? { ...m, text: accumulated } : m)
             );
+          } else if (event.type === "tbds") {
+            queryClient.invalidateQueries({ queryKey: ["tbds", projectId] });
           } else if (event.type === "done") {
             break;
           } else if (event.type === "error") {
