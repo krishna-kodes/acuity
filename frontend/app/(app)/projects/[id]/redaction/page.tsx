@@ -29,7 +29,7 @@ function mapDetections(raw: Array<{
     type: TYPE_LABELS[d.pii_type] ?? d.pii_type,
     method: METHOD_LABELS[d.detection_method] ?? d.detection_method,
     placeholder: d.text_replacement,
-    confidence: 0.9,
+    confidence: d.detection_method === "regex" ? 1.0 : 0.85,
     decision: d.confirmed ? ("confirmed" as const) : d.overridden ? ("override" as const) : undefined,
   }));
 }
