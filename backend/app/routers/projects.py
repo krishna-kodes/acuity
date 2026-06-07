@@ -1,5 +1,6 @@
 import json
 import os
+import re
 from urllib.parse import quote
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
@@ -62,6 +63,60 @@ def _get_project_or_404(project_id: str, db: Session) -> Project:
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     return project
+
+
+def _group_paragraphs(lines: list[str]) -> list[list[str]]:
+    """Group non-empty lines into paragraph groups split by blank lines."""
+    groups: list[list[str]] = []
+    current: list[str] = []
+    for line in lines:
+        if line.strip():
+            current.append(line.strip())
+        else:
+            if current:
+                groups.append(current)
+                current = []
+    if current:
+        groups.append(current)
+    return groups if groups else [[""]]
+
+
+def _parse_proposal_sections(title: str, text: str) -> "ProposalContent":
+    """Parse LLM-generated text into ProposalContent sections."""
+    from app.services.exporter import ProposalContent, ProposalSection
+
+    # Try to split on numbered sections (1. Title) or ## headings
+    lines = text.strip().split("\n")
+    sections: list[ProposalSection] = []
+    current_heading = ""
+    current_body_lines: list[str] = []
+
+    section_pattern = re.compile(r"^(#{1,3}\s+|[0-9]+\.\s+)(.+)")
+
+    for line in lines:
+        m = section_pattern.match(line)
+        if m:
+            if current_heading:
+                sections.append(ProposalSection(
+                    heading=current_heading,
+                    body="\n\n".join(" ".join(g) for g in _group_paragraphs(current_body_lines)),
+                ))
+            current_heading = m.group(2).strip()
+            current_body_lines = []
+        else:
+            current_body_lines.append(line)
+
+    if current_heading:
+        sections.append(ProposalSection(
+            heading=current_heading,
+            body="\n\n".join(" ".join(g) for g in _group_paragraphs(current_body_lines)),
+        ))
+
+    if not sections:
+        # Fallback: no sections detected, put everything in one section
+        sections = [ProposalSection(heading="Requirements", body=text.strip())]
+
+    return ProposalContent(title=title, sections=sections)
 
 
 @router.get("/projects", response_model=list[ProjectResponse])
@@ -334,21 +389,103 @@ def create_clarification(
 
 
 @router.post("/projects/{project_id}/proposal", response_model=ProposalResponse, status_code=201)
-def generate_proposal(
+async def generate_proposal(
     project_id: str,
     db: Session = Depends(get_db),
 ) -> ProposalResponse:
     from app.services.exporter import generate_proposal_docx
+    from app.services.rag import retrieve
+    from app.services.llm_factory import get_llm
+    from app.models.clarification import Clarification
 
     project = _get_project_or_404(project_id, db)
 
+    # 1. Gather document chunks via RAG
+    try:
+        chunks = await retrieve(
+            str(project.id),
+            "project requirements scope objectives features",
+            top_k=12,
+            top_n=12,
+        )
+        doc_context = "\n\n---\n\n".join(c.get("text", "") for c in chunks)
+    except Exception:
+        doc_context = ""
+
+    # 2. Resolved clarifications
+    resolved = (
+        db.query(Clarification)
+        .filter(
+            Clarification.project_id == project.id,
+            Clarification.status == TBDStatus.answered,
+        )
+        .all()
+    )
+    clarification_context = "\n".join(
+        f"- [{c.level}] {c.title}: {c.answer}" for c in resolved if c.answer
+    ) or "None"
+
+    open_items = (
+        db.query(Clarification)
+        .filter(
+            Clarification.project_id == project.id,
+            Clarification.status.in_([TBDStatus.open, TBDStatus.tbd]),
+        )
+        .all()
+    )
+    open_context = "\n".join(f"- {c.title}" for c in open_items) or "None"
+
+    # 3. Chat messages from LangGraph state
+    chat_context = "No chat history available."
+    try:
+        wf = await get_workflow()
+        config = {"configurable": {"thread_id": str(project.id)}}
+        state_snapshot = await wf.aget_state(config)
+        if state_snapshot:
+            chat_msgs = state_snapshot.values.get("chat_messages", [])
+            if chat_msgs:
+                chat_context = "\n".join(
+                    f"{m['role'].upper()}: {m['content']}"
+                    for m in chat_msgs[-10:]
+                )
+    except Exception:
+        pass
+
+    # 4. Generate proposal with LLM
+    llm = get_llm()
+    prompt = (
+        f'You are a senior business analyst. Write a formal requirements proposal document '
+        f'for the project "{project.name}".\n\n'
+        f"## Source Document Excerpts\n{doc_context or 'No document context available.'}\n\n"
+        f"## Resolved Clarifications\n{clarification_context}\n\n"
+        f"## Recent Chat Refinements\n{chat_context}\n\n"
+        f"## Open Items\n{open_context}\n\n"
+        "Write a professional proposal with these exact sections using '## ' headings:\n"
+        "## Executive Summary\n"
+        "## Project Scope & Objectives\n"
+        "## Functional Requirements\n"
+        "## Non-Functional Requirements\n"
+        "## Resolved Items\n"
+        "## Open Items & Assumptions\n\n"
+        "Be specific. Use information from the document excerpts. "
+        "Do not invent requirements not present in the source."
+    )
+
+    try:
+        response = await llm.ainvoke([{"role": "user", "content": prompt}])
+        generated_text = response.content if hasattr(response, "content") else str(response)
+    except Exception as exc:
+        generated_text = (
+            f"## Executive Summary\nProposal generation encountered an error: {exc}\n\n"
+            f"## Project Scope & Objectives\n{doc_context[:500] if doc_context else 'See source document.'}"
+        )
+
+    # 5. Build structured content and write DOCX
+    content = _parse_proposal_sections(project.name, generated_text)
+    content_path = generate_proposal_docx(project.id, content)
+
+    # 6. Persist proposal + advance phase
     doc = db.query(Document).filter(Document.project_id == project.id).first()
-    content = f"Requirements proposal for: {project.name}"
-    if doc:
-        content += f"\n\nSource document: {doc.filename}"
-
-    content_path = generate_proposal_docx(project.id, project.name, content)
-
     proposal = Proposal(
         project_id=project.id,
         document_id=doc.id if doc else 0,
