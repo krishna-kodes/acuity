@@ -6,8 +6,17 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { PhaseProgressStepper } from "@/components/phase-progress-stepper";
 import { ChatThread } from "@/components/chat-thread";
 import { TBDClarificationWidget } from "@/components/tbd-clarification-widget";
+import { ErrorBanner } from "@/components/page-states";
 import { getPhasesForRoute, getNextPhaseRoute } from "@/lib/project-phases";
-import { getTBDs, submitClarification, generateProposal } from "@/lib/api";
+import {
+  getTBDs,
+  submitClarification,
+  generateProposalRaw,
+  retryProposal,
+  approveProposal,
+  getProposalExportUrl,
+} from "@/lib/api";
+import type { ProposalData } from "@/lib/api";
 import type { ChatMessage } from "@/components/chat-thread";
 import type { TBDItem, TBDAction } from "@/components/tbd-clarification-widget";
 import { cn } from "@/lib/utils";
@@ -47,6 +56,14 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
   const textareaRef  = useRef<HTMLTextAreaElement>(null);
   const bottomRef    = useRef<HTMLDivElement>(null);
   const sendingRef   = useRef(false);
+
+  // Proposal preview state
+  const [proposalData, setProposalData] = useState<ProposalData | null>(null);
+  const [retryComment, setRetryComment] = useState("");
+  const [showRetryInput, setShowRetryInput] = useState(false);
+  const [retrying, setRetrying] = useState(false);
+  const [approving, setApproving] = useState(false);
+  const [proposalError, setProposalError] = useState<string | null>(null);
 
   const { data: remoteTbds } = useQuery({
     queryKey: ["tbds", projectId],
@@ -187,12 +204,43 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
 
   async function handleGenerateProposal() {
     setGenerating(true);
+    setProposalError(null);
     try {
-      await generateProposal(projectId);
-    } catch {
-      // Non-fatal — navigate regardless
+      const data = await generateProposalRaw(projectId);
+      setProposalData(data);
+    } catch (err) {
+      setProposalError(err instanceof Error ? err.message : "Generation failed");
+    } finally {
+      setGenerating(false);
     }
-    router.push(getNextPhaseRoute("chat", projectId));
+  }
+
+  async function handleRetry() {
+    if (!retryComment.trim()) return;
+    setRetrying(true);
+    setProposalError(null);
+    try {
+      const data = await retryProposal(projectId, retryComment);
+      setProposalData(data);
+      setRetryComment("");
+      setShowRetryInput(false);
+    } catch (err) {
+      setProposalError(err instanceof Error ? err.message : "Retry failed");
+    } finally {
+      setRetrying(false);
+    }
+  }
+
+  async function handleApprove() {
+    setApproving(true);
+    setProposalError(null);
+    try {
+      await approveProposal(projectId);
+      router.push(getNextPhaseRoute("chat", projectId));
+    } catch (err) {
+      setProposalError(err instanceof Error ? err.message : "Approval failed");
+      setApproving(false);
+    }
   }
 
   return (
@@ -252,55 +300,193 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
           </div>
         </div>
 
-        {/* Right: TBD widget + generate proposal */}
+        {/* Right: TBD widget / proposal preview */}
         <div className="w-full lg:w-80 shrink-0 flex flex-col overflow-hidden lg:overflow-y-auto">
-          <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
-            <span className="text-xs font-semibold text-foreground">TBD Items</span>
-            {outstandingTbds > 0 && (
-              <span className="text-[11px] font-medium text-warning bg-warning-subtle px-2 py-0.5 rounded-full">
-                {outstandingTbds} open
-              </span>
-            )}
-          </div>
 
-          <div className="flex-1 overflow-y-auto px-4 py-4">
-            <TBDClarificationWidget items={tbdItems} onAction={handleTBDAction} />
-          </div>
-
-          {/* Generate Proposal */}
-          <div className="shrink-0 px-4 py-4 border-t border-border bg-background">
-            {!allTbdsResolved && (
-              <p className="text-[11px] text-text-muted mb-3 text-center">
-                Resolve {outstandingTbds} TBD{outstandingTbds !== 1 ? "s" : ""} to unlock proposal generation.
-              </p>
-            )}
-            <button
-              onClick={handleGenerateProposal}
-              disabled={!allTbdsResolved || generating}
-              className={cn(
-                "w-full flex items-center justify-center gap-2 py-2.5 rounded-md text-sm font-medium transition-colors",
-                allTbdsResolved && !generating
-                  ? "bg-primary text-primary-foreground hover:bg-accent-hover"
-                  : "bg-muted text-text-muted cursor-not-allowed"
-              )}
-            >
-              {generating ? (
-                <>
-                  <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 16 16" stroke="currentColor" strokeWidth={2}>
-                    <path d="M8 2a6 6 0 1 0 6 6" strokeLinecap="round" />
-                  </svg>
-                  Generating…
-                </>
-              ) : (
-                <>
-                  Generate Proposal
+          {proposalData ? (
+            /* ── Proposal preview panel ── */
+            <>
+              {/* Header */}
+              <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
+                <button
+                  onClick={() => setProposalData(null)}
+                  className="flex items-center gap-1.5 text-xs text-text-muted hover:text-foreground transition-colors"
+                >
                   <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 14 14" stroke="currentColor" strokeWidth={2}>
-                    <path d="M2 7h10M8 3l4 4-4 4" strokeLinecap="round" strokeLinejoin="round" />
+                    <path d="M9 3L5 7l4 4" strokeLinecap="round" strokeLinejoin="round" />
                   </svg>
-                </>
-              )}
-            </button>
-          </div>
+                  Back to TBDs
+                </button>
+                <a
+                  href={getProposalExportUrl(projectId)}
+                  download
+                  className="flex items-center gap-1 text-xs text-text-muted hover:text-foreground transition-colors"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 14 14" stroke="currentColor" strokeWidth={2}>
+                    <path d="M7 2v7M4 6l3 3 3-3M2 11h10" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                  Download
+                </a>
+              </div>
+
+              {/* Sections */}
+              <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+                <p className="text-[11px] font-semibold text-foreground uppercase tracking-wide">
+                  Generated Proposal
+                </p>
+                {proposalData.sections.length === 0 ? (
+                  <p className="text-xs text-text-muted">No sections found in proposal.</p>
+                ) : (
+                  proposalData.sections.map((section, i) => (
+                    <div key={i} className="space-y-1">
+                      <h3 className="text-xs font-semibold text-foreground">{section.heading}</h3>
+                      <p className="text-xs text-text-secondary leading-relaxed whitespace-pre-wrap">
+                        {section.body}
+                      </p>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              {/* Actions */}
+              <div className="shrink-0 px-4 py-4 border-t border-border bg-background space-y-3">
+                {proposalError && (
+                  <ErrorBanner message={proposalError} />
+                )}
+
+                {showRetryInput && (
+                  <div className="space-y-2">
+                    <textarea
+                      value={retryComment}
+                      onChange={(e) => setRetryComment(e.target.value)}
+                      placeholder="Describe what to change or add…"
+                      rows={3}
+                      className="w-full resize-none bg-card border border-border rounded-lg px-3 py-2 text-xs text-foreground placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-primary/40"
+                    />
+                    <div className="flex gap-2">
+                      <button
+                        onClick={handleRetry}
+                        disabled={!retryComment.trim() || retrying}
+                        className={cn(
+                          "flex-1 flex items-center justify-center gap-1.5 py-2 rounded-md text-xs font-medium transition-colors",
+                          retryComment.trim() && !retrying
+                            ? "bg-primary text-primary-foreground hover:bg-accent-hover"
+                            : "bg-muted text-text-muted cursor-not-allowed"
+                        )}
+                      >
+                        {retrying ? (
+                          <>
+                            <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 16 16" stroke="currentColor" strokeWidth={2}>
+                              <path d="M8 2a6 6 0 1 0 6 6" strokeLinecap="round" />
+                            </svg>
+                            Regenerating…
+                          </>
+                        ) : "Submit Feedback"}
+                      </button>
+                      <button
+                        onClick={() => { setShowRetryInput(false); setRetryComment(""); }}
+                        className="px-3 py-2 rounded-md text-xs text-text-muted hover:text-foreground border border-border transition-colors"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {!showRetryInput && (
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setShowRetryInput(true)}
+                      className="flex-1 py-2 rounded-md text-xs font-medium border border-border text-foreground hover:bg-card transition-colors"
+                    >
+                      Retry with Comment
+                    </button>
+                    <button
+                      onClick={handleApprove}
+                      disabled={approving}
+                      className={cn(
+                        "flex-1 flex items-center justify-center gap-1.5 py-2 rounded-md text-xs font-medium transition-colors",
+                        !approving
+                          ? "bg-primary text-primary-foreground hover:bg-accent-hover"
+                          : "bg-muted text-text-muted cursor-not-allowed"
+                      )}
+                    >
+                      {approving ? (
+                        <>
+                          <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 16 16" stroke="currentColor" strokeWidth={2}>
+                            <path d="M8 2a6 6 0 1 0 6 6" strokeLinecap="round" />
+                          </svg>
+                          Approving…
+                        </>
+                      ) : (
+                        <>
+                          Approve
+                          <svg className="w-3 h-3" fill="none" viewBox="0 0 14 14" stroke="currentColor" strokeWidth={2}>
+                            <path d="M2 7h10M8 3l4 4-4 4" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                )}
+              </div>
+            </>
+          ) : (
+            /* ── TBD widget + generate button ── */
+            <>
+              <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
+                <span className="text-xs font-semibold text-foreground">TBD Items</span>
+                {outstandingTbds > 0 && (
+                  <span className="text-[11px] font-medium text-warning bg-warning-subtle px-2 py-0.5 rounded-full">
+                    {outstandingTbds} open
+                  </span>
+                )}
+              </div>
+
+              <div className="flex-1 overflow-y-auto px-4 py-4">
+                <TBDClarificationWidget items={tbdItems} onAction={handleTBDAction} />
+              </div>
+
+              {/* Generate Proposal */}
+              <div className="shrink-0 px-4 py-4 border-t border-border bg-background space-y-3">
+                {proposalError && (
+                  <ErrorBanner message={proposalError} />
+                )}
+                {!allTbdsResolved && (
+                  <p className="text-[11px] text-text-muted text-center">
+                    Resolve {outstandingTbds} TBD{outstandingTbds !== 1 ? "s" : ""} to unlock proposal generation.
+                  </p>
+                )}
+                <button
+                  onClick={handleGenerateProposal}
+                  disabled={!allTbdsResolved || generating}
+                  className={cn(
+                    "w-full flex items-center justify-center gap-2 py-2.5 rounded-md text-sm font-medium transition-colors",
+                    allTbdsResolved && !generating
+                      ? "bg-primary text-primary-foreground hover:bg-accent-hover"
+                      : "bg-muted text-text-muted cursor-not-allowed"
+                  )}
+                >
+                  {generating ? (
+                    <>
+                      <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 16 16" stroke="currentColor" strokeWidth={2}>
+                        <path d="M8 2a6 6 0 1 0 6 6" strokeLinecap="round" />
+                      </svg>
+                      Generating…
+                    </>
+                  ) : (
+                    <>
+                      Generate Proposal
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 14 14" stroke="currentColor" strokeWidth={2}>
+                        <path d="M2 7h10M8 3l4 4-4 4" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    </>
+                  )}
+                </button>
+              </div>
+            </>
+          )}
+
         </div>
 
       </div>
