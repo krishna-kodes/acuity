@@ -37,8 +37,9 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
   const [input, setInput]           = useState("");
   const [isLoading, setIsLoading]   = useState(false);
   const [generating, setGenerating] = useState(false);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const bottomRef   = useRef<HTMLDivElement>(null);
+  const textareaRef  = useRef<HTMLTextAreaElement>(null);
+  const bottomRef    = useRef<HTMLDivElement>(null);
+  const sendingRef   = useRef(false);
 
   const { data: remoteTbds } = useQuery({
     queryKey: ["tbds", projectId],
@@ -53,6 +54,8 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
         status: "open" as TBDAction,
       }));
     },
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
   });
 
   const tbdItems: TBDItem[] = (remoteTbds ?? []).map((t) => ({
@@ -78,7 +81,8 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
 
   async function sendMessage() {
     const text = input.trim();
-    if (!text || isLoading) return;
+    if (!text || isLoading || sendingRef.current) return;
+    sendingRef.current = true;
     setInput("");
 
     const userMsg: ChatMessage = {
@@ -152,6 +156,7 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
     );
   } finally {
     setIsLoading(false);
+    sendingRef.current = false;
   }
   }
 

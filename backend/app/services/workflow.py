@@ -10,12 +10,11 @@ Usage:
 """
 
 import asyncio
-import sqlite3
 from functools import wraps
 from typing import Any, TypedDict
 
 from langchain_core.tools import tool
-from langgraph.checkpoint.sqlite import SqliteSaver
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.graph import END, StateGraph
 from langgraph.prebuilt import create_react_agent
 from pydantic import BaseModel
@@ -294,7 +293,7 @@ async def _chat_turn_node(state: ProjectState) -> dict[str, Any]:
     ]
     llm = get_llm()
     response_parts: list[str] = []
-    async for chunk in llm.astream(lc_messages):
+    async for chunk in llm.with_config({"run_name": "chat_response"}).astream(lc_messages):
         if isinstance(chunk.content, str):
             response_parts.append(chunk.content)
     response_content = "".join(response_parts)
@@ -524,21 +523,10 @@ async def _phase_6_epics_node(state: ProjectState) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 _workflow_instance = None
-_sqlite_conn = None
+_aiosqlite_conn = None
 
 
-def build_workflow():
-    """Build and compile the LangGraph StateGraph with SqliteSaver checkpointer.
-
-    Returns a CompiledStateGraph pausing after each phase (interrupt_after).
-    Callers invoke the graph per PM "Proceed" action; the checkpointer
-    resumes from the last completed phase using thread_id = project_id.
-    """
-    global _sqlite_conn
-    # Keep connection open for the lifetime of the module (ADR-002: SqliteSaver)
-    _sqlite_conn = sqlite3.connect("./project_state.db", check_same_thread=False)
-    checkpointer = SqliteSaver(_sqlite_conn)
-
+def _compile_graph(checkpointer) -> "CompiledStateGraph":
     workflow = StateGraph(ProjectState)
 
     workflow.add_node("phase_2_init",     _phase_2_init_node)
@@ -560,7 +548,6 @@ def build_workflow():
 
     return workflow.compile(
         checkpointer=checkpointer,
-        # Pause after each phase so the PM can review before proceeding
         interrupt_after=[
             "chat_turn",
             "phase_3_stack",
@@ -570,11 +557,14 @@ def build_workflow():
     )
 
 
-def get_workflow():
-    """Return the module-level compiled workflow (lazy singleton)."""
-    global _workflow_instance
+async def get_workflow():
+    """Return the module-level compiled workflow (lazy async singleton)."""
+    global _workflow_instance, _aiosqlite_conn
     if _workflow_instance is None:
-        _workflow_instance = build_workflow()
+        import aiosqlite
+        _aiosqlite_conn = await aiosqlite.connect("./project_state.db")
+        checkpointer = AsyncSqliteSaver(_aiosqlite_conn)
+        _workflow_instance = _compile_graph(checkpointer)
     return _workflow_instance
 
 
@@ -592,14 +582,14 @@ async def run_phase(project_id: str, state_update: dict | None = None) -> dict:
     Returns:
         The updated ProjectState dict after the phase completes.
     """
-    wf = get_workflow()
+    wf = await get_workflow()
     config: dict = {"configurable": {"thread_id": project_id}}
 
-    existing = wf.get_state(config)
+    existing = await wf.aget_state(config)
 
     if existing.values:
         if state_update:
-            wf.update_state(config, state_update)
+            await wf.aupdate_state(config, state_update)
         result = await wf.ainvoke(None, config=config)
     else:
         initial: ProjectState = {**_EMPTY_STATE, "project_id": project_id}

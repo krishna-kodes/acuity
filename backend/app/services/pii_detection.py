@@ -22,7 +22,7 @@ from app.config import settings
 # ---------------------------------------------------------------------------
 
 _REGEX_PATTERNS: dict[str, re.Pattern] = {
-    "EMAIL": re.compile(r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}"),
+    "EMAIL": re.compile(r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}\b"),
     "PHONE": re.compile(
         r"(\+?1[\s\-]?)?(\([0-9]{3}\)|[0-9]{3})[\s.\-][0-9]{3}[\s.\-][0-9]{4}"
     ),
