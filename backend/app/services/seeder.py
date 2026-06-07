@@ -59,6 +59,8 @@ def seed_employees(db: Session, count: int | None = None) -> int:
             email=fake.unique.email(),
             seniority=fake.random_element(_SENIORITY_LEVELS),
             availability_pct=fake.random_element([50, 75, 100]),
+            joined_at=fake.date_time_between(start_date="-3y", end_date="now"),
+            status=fake.random_element(["active"] * 17 + ["inactive"] * 3),
         )
         db.add(emp)
         db.flush()

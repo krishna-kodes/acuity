@@ -1,4 +1,6 @@
-from sqlalchemy import ForeignKey, Index, Integer, String, UniqueConstraint
+from datetime import datetime
+
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
@@ -22,6 +24,8 @@ class Employee(Base):
     email: Mapped[str | None] = mapped_column(String(255), unique=True)
     seniority: Mapped[str] = mapped_column(String(50), nullable=False)
     availability_pct: Mapped[int] = mapped_column(Integer, default=100, nullable=False)
+    joined_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
 
     employee_skills: Mapped[list["EmployeeSkill"]] = relationship(back_populates="employee")
 
