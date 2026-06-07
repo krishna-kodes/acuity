@@ -242,3 +242,37 @@ export async function updateTeam(
   })
   if (!res.ok) throw new Error(`Failed to save team: ${res.status}`)
 }
+
+// ── Proposal preview/retry/approve ────────────────────────────────────────────
+
+export type ProposalSection = { heading: string; body: string }
+
+export type ProposalData = {
+  id: string
+  project_id: string
+  content_path: string
+  created_at: string
+  sections: ProposalSection[]
+}
+
+export async function generateProposalRaw(projectId: string): Promise<ProposalData> {
+  const res = await fetch(`${_apiBase()}/api/v1/projects/${projectId}/proposal`, { method: "POST" })
+  if (!res.ok) throw new Error(`Generate failed: ${res.status}`)
+  return res.json()
+}
+
+export async function retryProposal(projectId: string, comment: string): Promise<ProposalData> {
+  const res = await fetch(`${_apiBase()}/api/v1/projects/${projectId}/proposal/retry`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ comment }),
+  })
+  if (!res.ok) throw new Error(`Retry failed: ${res.status}`)
+  return res.json()
+}
+
+export async function approveProposal(projectId: string): Promise<ProposalData> {
+  const res = await fetch(`${_apiBase()}/api/v1/projects/${projectId}/proposal/approve`, { method: "POST" })
+  if (!res.ok) throw new Error(`Approve failed: ${res.status}`)
+  return res.json()
+}
