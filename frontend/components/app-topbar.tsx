@@ -5,15 +5,17 @@ import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 
 const PATH_TITLES: Record<string, string> = {
-  "/":           "All Projects",
-  "/projects/new": "New Project",
-  "/redaction":  "Redaction Review",
-  "/chat":       "Chat & Refine",
-  "/techstack":  "Tech Stack",
-  "/team":       "Team Suggestion",
-  "/estimation": "Effort Estimation",
-  "/epics":      "Epics & Tasks",
-  "/metrics":    "Metrics",
+  "/":                  "All Projects",
+  "/projects/new":      "New Project",
+  "/redaction":         "Redaction Review",
+  "/chat":              "Chat & Refine",
+  "/techstack":         "Tech Stack",
+  "/team":              "Team Suggestion",
+  "/estimation":        "Effort Estimation",
+  "/epics":             "Epics & Tasks",
+  "/metrics":           "Metrics",
+  "/admin/employees":   "Employees",
+  "/admin/skills":      "Skills",
 };
 
 function deriveTitle(pathname: string): string {
@@ -21,7 +23,7 @@ function deriveTitle(pathname: string): string {
   for (const [suffix, label] of Object.entries(PATH_TITLES)) {
     if (pathname.endsWith(suffix)) return label;
   }
-  return "Acuity";
+  return "Cohort PM";
 }
 
 interface AppTopbarProps {
