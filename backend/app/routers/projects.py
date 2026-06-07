@@ -34,6 +34,7 @@ from app.schemas.project import (
     TBDItem,
     TechStackResponse,
     TeamResponse,
+    TeamUpdateRequest,
     phase_to_int,
 )
 from app.schemas.proposal import ProposalResponse
@@ -742,6 +743,33 @@ async def suggest_team(
 
     members = team.get("members", [])
     return TeamResponse(members=members, total=len(members))
+
+
+@router.put("/projects/{project_id}/team", status_code=200)
+async def update_team(
+    project_id: str,
+    body: TeamUpdateRequest,
+    db: Session = Depends(get_db),
+) -> dict:
+    """Persist PM-confirmed team (AI-suggested + manually added) and sync LangGraph state."""
+    project = _get_project_or_404(project_id, db)
+    existing = project.team_suggestion or {}
+    team = {
+        "members": body.members,
+        "technologies": existing.get("technologies", []),
+    }
+    project.team_suggestion = team
+    db.commit()
+
+    # Sync LangGraph checkpoint so estimation node picks up the confirmed team
+    try:
+        wf = await get_workflow()
+        config = {"configurable": {"thread_id": str(project.id)}}
+        await wf.aupdate_state(config, {"team_suggestion": team})
+    except Exception:
+        pass
+
+    return {"status": "ok", "total": len(body.members)}
 
 
 @router.post("/projects/{project_id}/estimate", response_model=EstimationResponse)

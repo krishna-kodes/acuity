@@ -223,3 +223,22 @@ export async function listAdminSkills(): Promise<AdminSkill[]> {
   if (!res.ok) throw new Error(`Failed to fetch skills: ${res.status}`)
   return res.json()
 }
+
+export async function updateTeam(
+  projectId: string,
+  members: Array<{
+    id: number
+    name: string
+    seniority: string
+    availability_pct: number
+    skills: string[]
+    manual?: boolean
+  }>
+): Promise<void> {
+  const res = await fetch(`${_apiBase()}/api/v1/projects/${projectId}/team`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ members }),
+  })
+  if (!res.ok) throw new Error(`Failed to save team: ${res.status}`)
+}
