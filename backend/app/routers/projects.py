@@ -1,5 +1,6 @@
 import json
 import os
+from urllib.parse import quote
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
@@ -474,10 +475,13 @@ def download_document(
 ) -> FileResponse:
     """Download the original uploaded requirements document."""
     _get_project_or_404(project_id, db)
-    doc = db.query(Document).filter(
-        Document.id == int(doc_id),
-        Document.project_id == int(project_id),
-    ).first()
+    try:
+        doc = db.query(Document).filter(
+            Document.id == int(doc_id),
+            Document.project_id == int(project_id),
+        ).first()
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Document not found")
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     file_path = f"documents/{project_id}_{doc.filename}"
@@ -486,7 +490,7 @@ def download_document(
     return FileResponse(
         file_path,
         media_type="application/octet-stream",
-        headers={"Content-Disposition": f"attachment; filename={doc.filename}"},
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(doc.filename)}"},
     )
 
 
@@ -498,15 +502,20 @@ def delete_document(
 ) -> None:
     """Delete an uploaded document record and its file on disk."""
     _get_project_or_404(project_id, db)
-    doc = db.query(Document).filter(
-        Document.id == int(doc_id),
-        Document.project_id == int(project_id),
-    ).first()
+    try:
+        doc = db.query(Document).filter(
+            Document.id == int(doc_id),
+            Document.project_id == int(project_id),
+        ).first()
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Document not found")
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     file_path = f"documents/{project_id}_{doc.filename}"
-    if os.path.exists(file_path):
+    try:
         os.remove(file_path)
+    except OSError:
+        pass
     db.delete(doc)
     db.commit()
 
@@ -519,14 +528,19 @@ def delete_proposal(
 ) -> None:
     """Delete a generated proposal record and its DOCX file on disk."""
     _get_project_or_404(project_id, db)
-    proposal = db.query(Proposal).filter(
-        Proposal.id == int(proposal_id),
-        Proposal.project_id == int(project_id),
-    ).first()
+    try:
+        proposal = db.query(Proposal).filter(
+            Proposal.id == int(proposal_id),
+            Proposal.project_id == int(project_id),
+        ).first()
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Proposal not found")
     if not proposal:
         raise HTTPException(status_code=404, detail="Proposal not found")
-    if os.path.exists(proposal.content_path):
+    try:
         os.remove(proposal.content_path)
+    except OSError:
+        pass
     db.delete(proposal)
     db.commit()
 
