@@ -1,15 +1,16 @@
 "use client";
 
 import { useState, use } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { PhaseProgressStepper } from "@/components/phase-progress-stepper";
 import { MetricsStatCard } from "@/components/metrics-stat-card";
 import { MetricsLineChart } from "@/components/metrics-line-chart";
 import { MetricsBarChart } from "@/components/metrics-bar-chart";
 import { getPhasesForRoute } from "@/lib/project-phases";
+import { getMetrics } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
-// ── Mock data ────────────────────────────────────────────────────────────────
-// TODO (Epic 4): fetch from GET /api/v1/projects/{id}/metrics
+// ── Fallback mock data (shown while loading or when no runs yet) ──────────────
 
 const TOKEN_TREND = [
   { day: "Mon", input: 12400, output: 3200, cost: 0.025 },
@@ -19,13 +20,13 @@ const TOKEN_TREND = [
   { day: "Fri", input: 15800, output: 4300, cost: 0.031 },
 ];
 
-const TOKEN_BY_PHASE = [
-  { phase: "Ingest",  tokens: 8400 },
-  { phase: "RAG",     tokens: 31200 },
-  { phase: "Stack",   tokens: 9800 },
-  { phase: "Team",    tokens: 7100 },
-  { phase: "Estimate",tokens: 14600 },
-  { phase: "Epics",   tokens: 7100 },
+const TOKEN_BY_PHASE_MOCK = [
+  { phase: "Ingest",   tokens: 8400 },
+  { phase: "RAG",      tokens: 31200 },
+  { phase: "Stack",    tokens: 9800 },
+  { phase: "Team",     tokens: 7100 },
+  { phase: "Estimate", tokens: 14600 },
+  { phase: "Epics",    tokens: 7100 },
 ];
 
 const QUALITY_SCORES = [
@@ -47,16 +48,16 @@ const RETRIEVAL_BY_PHASE = [
   { phase: "Q5", recall: 0.87, relevancy: 0.83 },
 ];
 
-const ERRORS_BY_PHASE = [
-  { phase: "Ingest",  errors: 0, retries: 1 },
-  { phase: "RAG",     errors: 2, retries: 4 },
-  { phase: "Stack",   errors: 0, retries: 0 },
-  { phase: "Team",    errors: 1, retries: 2 },
-  { phase: "Estimate",errors: 0, retries: 1 },
-  { phase: "Sync",    errors: 1, retries: 3 },
+const ERRORS_BY_PHASE_MOCK = [
+  { phase: "Ingest",   errors: 0 },
+  { phase: "RAG",      errors: 2 },
+  { phase: "Stack",    errors: 0 },
+  { phase: "Team",     errors: 1 },
+  { phase: "Estimate", errors: 0 },
+  { phase: "Sync",     errors: 1 },
 ];
 
-const LATENCY_BY_NODE = [
+const LATENCY_BY_NODE_MOCK = [
   { node: "Ingest",   p50: 420,  p95: 890 },
   { node: "Embed",    p50: 1240, p95: 2800 },
   { node: "Rewrite",  p50: 380,  p95: 720 },
@@ -66,7 +67,7 @@ const LATENCY_BY_NODE = [
   { node: "Sync",     p50: 510,  p95: 1100 },
 ];
 
-// ── Tab definitions ──────────────────────────────────────────────────────────
+// ── Tab definitions ───────────────────────────────────────────────────────────
 
 const TABS = [
   "Token Usage & Cost",
@@ -95,18 +96,30 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   );
 }
 
-// ── Tab panels ───────────────────────────────────────────────────────────────
+// ── Tab panels ────────────────────────────────────────────────────────────────
 
-function TabTokens() {
-  const totalTokens = TOKEN_BY_PHASE.reduce((s, r) => s + r.tokens, 0);
-  const totalCost   = TOKEN_TREND.reduce((s, r) => s + r.cost, 0);
+type ApiMetrics = {
+  total_tokens: number;
+  total_cost_usd: number;
+  tokens_by_phase: { phase: string; tokens: number; cost: number }[];
+  latency_by_node: { node: string; p50: number; p95: number }[];
+  errors_by_phase: { phase: string; errors: number }[];
+  error_count: number;
+};
+
+function TabTokens({ metrics }: { metrics?: ApiMetrics }) {
+  const tokensByPhase = metrics?.tokens_by_phase?.length
+    ? metrics.tokens_by_phase
+    : TOKEN_BY_PHASE_MOCK;
+  const totalTokens = metrics?.total_tokens ?? tokensByPhase.reduce((s, r) => s + r.tokens, 0);
+  const totalCost   = metrics?.total_cost_usd ?? TOKEN_TREND.reduce((s, r) => s + r.cost, 0);
   return (
     <div className="flex flex-col gap-5">
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <MetricsStatCard label="Total Tokens"   value={totalTokens.toLocaleString('en-US')} />
-        <MetricsStatCard label="Total Cost"     value={`$${totalCost.toFixed(3)}`} unit="USD" delta={{ value: "-8% vs last run", direction: "down" }} />
-        <MetricsStatCard label="Input Tokens"   value={Math.floor(totalTokens * 0.78).toLocaleString('en-US')} />
-        <MetricsStatCard label="Output Tokens"  value={Math.floor(totalTokens * 0.22).toLocaleString('en-US')} />
+        <MetricsStatCard label="Total Tokens"  value={totalTokens.toLocaleString('en-US')} />
+        <MetricsStatCard label="Total Cost"    value={`$${totalCost.toFixed(3)}`} unit="USD" />
+        <MetricsStatCard label="Input Tokens"  value={Math.floor(totalTokens * 0.78).toLocaleString('en-US')} />
+        <MetricsStatCard label="Output Tokens" value={Math.floor(totalTokens * 0.22).toLocaleString('en-US')} />
       </div>
       <Card>
         <SectionLabel>Daily Token Trend</SectionLabel>
@@ -114,7 +127,7 @@ function TabTokens() {
       </Card>
       <Card>
         <SectionLabel>Tokens by Phase</SectionLabel>
-        <MetricsBarChart data={TOKEN_BY_PHASE} xKey="phase" series={[{ key: "tokens", label: "Tokens" }]} height={180} />
+        <MetricsBarChart data={tokensByPhase} xKey="phase" series={[{ key: "tokens", label: "Tokens" }]} height={180} />
       </Card>
     </div>
   );
@@ -150,10 +163,10 @@ function TabRetrieval() {
   return (
     <div className="flex flex-col gap-5">
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <MetricsStatCard label="Context Recall"    value={`${Math.round(avgRecall * 100)}%`}    delta={{ value: "≥ 0.80 target ✓", direction: "up" }} />
-        <MetricsStatCard label="Answer Relevancy"  value={`${Math.round(avgRelevancy * 100)}%`} delta={{ value: "≥ 0.75 target ✓", direction: "up" }} />
+        <MetricsStatCard label="Context Recall"     value={`${Math.round(avgRecall * 100)}%`}    delta={{ value: "≥ 0.80 target ✓", direction: "up" }} />
+        <MetricsStatCard label="Answer Relevancy"   value={`${Math.round(avgRelevancy * 100)}%`} delta={{ value: "≥ 0.75 target ✓", direction: "up" }} />
         <MetricsStatCard label="Reranker Precision" value="74%"  delta={{ value: "≥ 70% target ✓", direction: "up" }} />
-        <MetricsStatCard label="Query Rewrites"    value="3" unit="/ query" />
+        <MetricsStatCard label="Query Rewrites"     value="3" unit="/ query" />
       </div>
       <Card>
         <SectionLabel>Recall vs Relevancy per Query</SectionLabel>
@@ -168,65 +181,52 @@ function TabRetrieval() {
   );
 }
 
-function TabErrors() {
-  const totalErrors  = ERRORS_BY_PHASE.reduce((s, r) => s + r.errors, 0);
-  const totalRetries = ERRORS_BY_PHASE.reduce((s, r) => s + r.retries, 0);
+function TabErrors({ metrics }: { metrics?: ApiMetrics }) {
+  const errorsByPhase = metrics?.errors_by_phase?.length
+    ? metrics.errors_by_phase
+    : ERRORS_BY_PHASE_MOCK;
+  const totalErrors = metrics?.error_count ?? errorsByPhase.reduce((s, r) => s + r.errors, 0);
   return (
     <div className="flex flex-col gap-5">
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <MetricsStatCard label="Total Errors"    value={totalErrors}  delta={{ value: totalErrors === 0 ? "clean run" : "investigate", direction: totalErrors === 0 ? "up" : "down" }} />
-        <MetricsStatCard label="Total Retries"   value={totalRetries} />
-        <MetricsStatCard label="GitHub Sync Fails" value="1" delta={{ value: "token expired", direction: "down" }} />
-        <MetricsStatCard label="Recovery Rate"   value="75%" delta={{ value: "3 / 4 retried ok", direction: "up" }} />
+        <MetricsStatCard label="Total Errors"     value={totalErrors} delta={{ value: totalErrors === 0 ? "clean run" : "investigate", direction: totalErrors === 0 ? "up" : "down" }} />
+        <MetricsStatCard label="GitHub Sync Fails" value="0" />
+        <MetricsStatCard label="Recovery Rate"    value="—" />
+        <MetricsStatCard label="Error Phases"     value={errorsByPhase.filter(p => p.errors > 0).length} />
       </div>
       <Card>
-        <SectionLabel>Errors &amp; Retries by Phase</SectionLabel>
+        <SectionLabel>Errors by Phase</SectionLabel>
         <MetricsBarChart
-          data={ERRORS_BY_PHASE}
+          data={errorsByPhase}
           xKey="phase"
-          series={[{ key: "errors", label: "Errors" }, { key: "retries", label: "Retries" }]}
+          series={[{ key: "errors", label: "Errors" }]}
           height={200}
-          stacked
         />
-      </Card>
-      <Card>
-        <SectionLabel>Recent Errors</SectionLabel>
-        <div className="flex flex-col divide-y divide-border">
-          {[
-            { phase: "RAG",  code: "LLM_TIMEOUT",    msg: "Gemini 1.5 Pro response timeout after 30s. Retried ×2, succeeded.",    ts: "Thu 14:22" },
-            { phase: "RAG",  code: "HALLUCINATION",  msg: "Groundedness score 0.58 — below threshold 0.70. Response flagged.",    ts: "Thu 15:07" },
-            { phase: "Team", code: "DB_QUERY_SLOW",  msg: "Employee skills query >500ms. WAL mode enabled, resolved on retry.",   ts: "Fri 09:13" },
-            { phase: "Sync", code: "GITHUB_401",     msg: "GitHub token expired. Update GITHUB_TOKEN in .env and re-sync.",        ts: "Fri 11:45" },
-          ].map((e, i) => (
-            <div key={i} className="flex items-start gap-3 py-2.5">
-              <span className="text-[10px] font-mono bg-destructive-subtle text-destructive px-1.5 py-0.5 rounded shrink-0 mt-0.5">{e.code}</span>
-              <div className="flex-1 min-w-0">
-                <p className="text-xs text-foreground">{e.msg}</p>
-                <p className="text-[10px] text-text-muted mt-0.5">{e.phase} · {e.ts}</p>
-              </div>
-            </div>
-          ))}
-        </div>
       </Card>
     </div>
   );
 }
 
-function TabLatency() {
-  const p50Total = LATENCY_BY_NODE.reduce((s, r) => s + r.p50, 0);
-  const p95Total = LATENCY_BY_NODE.reduce((s, r) => s + r.p95, 0);
+function TabLatency({ metrics }: { metrics?: ApiMetrics }) {
+  const latencyByNode = metrics?.latency_by_node?.length
+    ? metrics.latency_by_node
+    : LATENCY_BY_NODE_MOCK;
+  const p50Total = latencyByNode.reduce((s, r) => s + r.p50, 0);
+  const p95Total = latencyByNode.reduce((s, r) => s + r.p95, 0);
+  const slowest  = latencyByNode.reduce((a, b) => a.p50 > b.p50 ? a : b, latencyByNode[0]);
+  const fastest  = latencyByNode.reduce((a, b) => a.p50 < b.p50 ? a : b, latencyByNode[0]);
   return (
     <div className="flex flex-col gap-5">
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <MetricsStatCard label="P50 Total"  value={`${(p50Total / 1000).toFixed(1)}s`} delta={{ value: "end-to-end", direction: "neutral" }} />
-        <MetricsStatCard label="P95 Total"  value={`${(p95Total / 1000).toFixed(1)}s`} />
-        <MetricsStatCard label="Slowest Node" value="LLM" unit="2.1s p50" />
-        <MetricsStatCard label="Fastest Node" value="Retrieve" unit="290ms p50" />
+        <MetricsStatCard label="P50 Total"    value={`${(p50Total / 1000).toFixed(1)}s`} delta={{ value: "end-to-end", direction: "neutral" }} />
+        <MetricsStatCard label="P95 Total"    value={`${(p95Total / 1000).toFixed(1)}s`} />
+        <MetricsStatCard label="Slowest Node" value={slowest?.node ?? "—"} unit={slowest ? `${slowest.p50.toFixed(0)}ms p50` : ""} />
+        <MetricsStatCard label="Fastest Node" value={fastest?.node ?? "—"} unit={fastest ? `${fastest.p50.toFixed(0)}ms p50` : ""} />
       </div>
       <Card>
         <SectionLabel>P50 / P95 Latency per LangGraph Node (ms)</SectionLabel>
         <MetricsBarChart
-          data={LATENCY_BY_NODE}
+          data={latencyByNode}
           xKey="node"
           series={[{ key: "p50", label: "P50 (ms)" }, { key: "p95", label: "P95 (ms)" }]}
           height={220}
@@ -236,11 +236,21 @@ function TabLatency() {
   );
 }
 
-// ── Page ─────────────────────────────────────────────────────────────────────
+// ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function MetricsPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id: _id } = use(params);
+  const { id } = use(params);
   const [activeTab, setActiveTab] = useState<Tab>("Token Usage & Cost");
+
+  const { data: metricsData } = useQuery({
+    queryKey: ["metrics", id],
+    queryFn: async () => {
+      const { data } = await getMetrics(id);
+      return data as ApiMetrics | undefined;
+    },
+    enabled: !!id,
+    refetchInterval: 30_000,
+  });
 
   return (
     <div className="px-6 py-8 max-w-4xl mx-auto flex flex-col gap-6">
@@ -265,11 +275,11 @@ export default function MetricsPage({ params }: { params: Promise<{ id: string }
       </div>
 
       {/* Active tab content */}
-      {activeTab === "Token Usage & Cost" && <TabTokens />}
+      {activeTab === "Token Usage & Cost" && <TabTokens  metrics={metricsData} />}
       {activeTab === "AI Quality"         && <TabQuality />}
       {activeTab === "Retrieval"          && <TabRetrieval />}
-      {activeTab === "Error Handling"     && <TabErrors />}
-      {activeTab === "Latency"            && <TabLatency />}
+      {activeTab === "Error Handling"     && <TabErrors   metrics={metricsData} />}
+      {activeTab === "Latency"            && <TabLatency  metrics={metricsData} />}
     </div>
   );
 }

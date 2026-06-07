@@ -41,6 +41,8 @@ class Settings(BaseSettings):
     seed_project_count: int = 15
     seed_technology_count: int = 22
     metrics_enabled: bool = True
+    cost_per_1k_input_tokens: float = 0.0015
+    cost_per_1k_output_tokens: float = 0.002
 
     model_config = SettingsConfigDict(env_file=(".env", "../.env"), extra="ignore")
 
