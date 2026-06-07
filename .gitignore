@@ -32,6 +32,8 @@ app.db
 app.db-shm
 app.db-wal
 documents/
+# Allow the frontend route directory (source code), not document uploads
+!frontend/app/**/documents/
 
 # Playwright
 frontend/test-results/
