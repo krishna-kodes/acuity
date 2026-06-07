@@ -353,6 +353,7 @@ def generate_proposal(
         content_path=content_path,
     )
     db.add(proposal)
+    project.phase = ProjectPhase.techstack
     db.commit()
     db.refresh(proposal)
 

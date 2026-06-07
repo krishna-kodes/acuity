@@ -20,8 +20,8 @@ from pathlib import Path
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.models.enums import DocumentStatus
-from app.models.project import Document
+from app.models.enums import DocumentStatus, ProjectPhase
+from app.models.project import Document, Project
 
 
 @dataclass
@@ -92,6 +92,9 @@ async def _chunk_and_embed(
 
     db.query(Document).filter(Document.id == document_id).update(
         {"status": DocumentStatus.ready}
+    )
+    db.query(Project).filter(Project.id == project_id).update(
+        {"phase": ProjectPhase.chat}
     )
     db.commit()
     return stored
