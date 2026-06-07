@@ -85,15 +85,18 @@ async def retrieve_hybrid(
     return [chunk_map[cid] for cid, _ in top]
 
 
-def rerank(query: str, chunks: list[dict], top_n: int = 4) -> list[dict]:
-    """Re-rank chunks using a BERT cross-encoder and return the top_n results."""
+def rerank(query: str, chunks: list[dict], top_n: int = 4) -> tuple[list[dict], list[float]]:
+    """Re-rank chunks using a BERT cross-encoder.
+
+    Returns (top_n_chunks, all_candidate_scores) so callers can log retrieval quality.
+    """
     if not chunks:
-        return []
+        return [], []
     reranker = _get_reranker()
     pairs: list[tuple[str, str]] = [(query, c["text"]) for c in chunks]
     scores = reranker.predict(pairs)  # type: ignore[arg-type]
     ranked = sorted(zip(scores, chunks), key=lambda x: x[0], reverse=True)
-    return [c for _, c in ranked[:top_n]]
+    return [c for _, c in ranked[:top_n]], list(scores)
 
 
 async def retrieve(
@@ -101,10 +104,14 @@ async def retrieve(
     query: str,
     top_k: int | None = None,
     top_n: int | None = None,
-) -> list[dict]:
-    """Full RAG pipeline: query rewriting → hybrid retrieval → BERT reranking."""
+) -> tuple[list[dict], list[float], int]:
+    """Full RAG pipeline: query rewriting → hybrid retrieval → BERT reranking.
+
+    Returns (reranked_chunks, all_reranker_scores, n_candidates_before_rerank).
+    """
     top_k = top_k or settings.top_k_retrieval
     top_n = top_n or settings.top_n_rerank
     queries = await rewrite_queries(query, n=settings.query_rewrite_count)
     candidates = await retrieve_hybrid(project_id, queries, top_k)
-    return rerank(query, candidates, top_n)
+    chunks, scores = rerank(query, candidates, top_n)
+    return chunks, scores, len(candidates)

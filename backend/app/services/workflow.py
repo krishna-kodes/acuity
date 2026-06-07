@@ -27,7 +27,7 @@ from app.models.employee import Employee, EmployeeSkill, Skill
 from app.models.reference import ApprovedTechnology, HistoricalProject
 from app.services.llm_factory import get_llm
 from app.services.rag import retrieve
-from app.services.metrics_tracker import calc_cost, record_latency, record_tokens
+from app.services.metrics_tracker import calc_cost, record_latency, record_quality, record_retrieval, record_tokens
 from app.services.tbd_detection import detect_tbds, persist_tbds
 
 # ---------------------------------------------------------------------------
@@ -276,10 +276,26 @@ async def _chat_turn_node(state: ProjectState) -> dict[str, Any]:
         (m["content"] for m in reversed(messages) if m["role"] == "user"), ""
     )
 
-    chunks = await retrieve(project_id, last_user)
+    chunks, reranker_scores, n_candidates = await retrieve(project_id, last_user)
     context = "\n\n".join(
         f"[{c.get('section_hint', '')}] {c['text']}" for c in chunks
     )
+
+    if reranker_scores:
+        from sqlalchemy import func as _sqlfunc
+        from app.models.observability import RetrievalLog as _RetrievalLog
+        _rdb = SessionLocal()
+        try:
+            qidx = (_rdb.query(_sqlfunc.count(_RetrievalLog.id))
+                    .filter(_RetrievalLog.project_id == int(project_id))
+                    .scalar() or 0) + 1
+        finally:
+            _rdb.close()
+        record_retrieval(
+            int(project_id), "phase_2", qidx, n_candidates, len(chunks),
+            float(max(reranker_scores)),
+            float(sum(reranker_scores) / len(reranker_scores)),
+        )
 
     known = {t.get("text", "") for t in (state.get("tbd_items") or [])}
     try:
@@ -323,6 +339,12 @@ async def _chat_turn_node(state: ProjectState) -> dict[str, Any]:
             ))
         ])
         groundedness_score = float(gs.score) if hasattr(gs, "score") else None
+        if groundedness_score is not None:
+            record_quality(
+                int(project_id), "phase_2", "groundedness",
+                groundedness_score,
+                gs.reasoning if hasattr(gs, "reasoning") else None,
+            )
 
     messages.append({"role": "assistant", "content": response_content})
     return {
@@ -417,15 +439,22 @@ async def _phase_3_stack_node(state: ProjectState) -> dict[str, Any]:
 
     try:
         import time as _time
-        llm = get_llm(fast=False).with_structured_output(_TechStackChoice)
+        _llm_raw = get_llm(fast=False).with_structured_output(_TechStackChoice, include_raw=True)
         _t0 = _time.monotonic()
-        result = llm.invoke(
+        _raw_result = _llm_raw.invoke(
             f"Given this project proposal:\n{proposal_summary}\n\n"
             f"Select the most appropriate technologies from this approved list:\n{tech_descriptions}\n\n"
             "Choose 1-3 per category. Return frontend, backend, database, infra lists and a brief rationale."
         )
         record_latency(int(state["project_id"]), "phase_3", "tech_stack_node", (_time.monotonic() - _t0) * 1000)
-        tech_stack = result.model_dump()
+        result = _raw_result.get("parsed") or _raw_result
+        _raw_msg = _raw_result.get("raw")
+        if _raw_msg and hasattr(_raw_msg, "usage_metadata") and _raw_msg.usage_metadata:
+            from app.config import settings as _s
+            _inp = _raw_msg.usage_metadata.get("input_tokens", 0)
+            _out = _raw_msg.usage_metadata.get("output_tokens", 0)
+            record_tokens(int(state["project_id"]), "phase_3", _s.main_llm_model, _inp, _out, calc_cost(_inp, _out))
+        tech_stack = result.model_dump() if hasattr(result, "model_dump") else _FALLBACK_STACK
         ps["phase_3"] = "complete"
     except Exception:
         tech_stack = _FALLBACK_STACK
@@ -474,6 +503,14 @@ async def _phase_4_team_node(state: ProjectState) -> dict[str, Any]:
                 pass
 
     record_latency(int(state["project_id"]), "phase_4", "team_node", (_time.monotonic() - _t0) * 1000)
+    _p4_inp, _p4_out = 0, 0
+    for _msg in agent_result.get("messages", []):
+        if hasattr(_msg, "usage_metadata") and _msg.usage_metadata:
+            _p4_inp += _msg.usage_metadata.get("input_tokens", 0)
+            _p4_out += _msg.usage_metadata.get("output_tokens", 0)
+    if _p4_inp + _p4_out > 0:
+        from app.config import settings as _s
+        record_tokens(int(state["project_id"]), "phase_4", _s.main_llm_model, _p4_inp, _p4_out, calc_cost(_p4_inp, _p4_out))
     ps = dict(state.get("phase_status") or {})
     ps["phase_4"] = "complete"
     return {
@@ -522,6 +559,14 @@ async def _phase_5_estimate_node(state: ProjectState) -> dict[str, Any]:
                 pass
 
     record_latency(int(state["project_id"]), "phase_5", "estimation_node", (_time.monotonic() - _t0) * 1000)
+    _p5_inp, _p5_out = 0, 0
+    for _msg in agent_result.get("messages", []):
+        if hasattr(_msg, "usage_metadata") and _msg.usage_metadata:
+            _p5_inp += _msg.usage_metadata.get("input_tokens", 0)
+            _p5_out += _msg.usage_metadata.get("output_tokens", 0)
+    if _p5_inp + _p5_out > 0:
+        from app.config import settings as _s
+        record_tokens(int(state["project_id"]), "phase_5", _s.main_llm_model, _p5_inp, _p5_out, calc_cost(_p5_inp, _p5_out))
     ps = dict(state.get("phase_status") or {})
     ps["phase_5"] = "complete"
     return {"phase_status": ps, "effort_estimates": effort}
@@ -570,6 +615,14 @@ async def _phase_6_epics_node(state: ProjectState) -> dict[str, Any]:
                 pass
 
     record_latency(int(state["project_id"]), "phase_6", "epics_node", (_time.monotonic() - _t0) * 1000)
+    _p6_inp, _p6_out = 0, 0
+    for _msg in agent_result.get("messages", []):
+        if hasattr(_msg, "usage_metadata") and _msg.usage_metadata:
+            _p6_inp += _msg.usage_metadata.get("input_tokens", 0)
+            _p6_out += _msg.usage_metadata.get("output_tokens", 0)
+    if _p6_inp + _p6_out > 0:
+        from app.config import settings as _s
+        record_tokens(int(state["project_id"]), "phase_6", _s.main_llm_model, _p6_inp, _p6_out, calc_cost(_p6_inp, _p6_out))
     ps = dict(state.get("phase_status") or {})
     ps["phase_6"] = "complete"
     return {"phase_status": ps, "epics": epics}

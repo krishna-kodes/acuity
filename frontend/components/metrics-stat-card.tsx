@@ -6,6 +6,7 @@ interface MetricsStatCardProps {
   unit?: string;
   delta?: { value: string; direction: "up" | "down" | "neutral" };
   icon?: React.ReactNode;
+  infoIcon?: React.ReactNode;
   className?: string;
 }
 
@@ -33,6 +34,7 @@ export function MetricsStatCard({
   unit,
   delta,
   icon,
+  infoIcon,
   className,
 }: MetricsStatCardProps) {
   return (
@@ -43,9 +45,12 @@ export function MetricsStatCard({
       )}
     >
       <div className="flex items-center justify-between">
-        <span className="text-xs font-semibold uppercase tracking-wide text-text-muted">
-          {label}
-        </span>
+        <div className="flex items-center gap-1">
+          <span className="text-xs font-semibold uppercase tracking-wide text-text-muted">
+            {label}
+          </span>
+          {infoIcon}
+        </div>
         {icon && (
           <div className="w-7 h-7 rounded-lg bg-accent-subtle flex items-center justify-center text-accent-foreground">
             {icon}
