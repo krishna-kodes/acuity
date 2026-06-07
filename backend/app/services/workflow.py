@@ -537,6 +537,21 @@ async def _phase_5_estimate_node(state: ProjectState) -> dict[str, Any]:
     proposal_summary = state.get("proposal_state", {}).get("summary", "No proposal available.")
     team_size = len(state.get("team_suggestion", {}).get("members", [])) or 3
 
+    # Load modules from project record for label-level breakdown
+    modules_text = ""
+    try:
+        from app.models.project import Project as _ProjectModel
+        with SessionLocal() as _db:
+            _proj = _db.get(_ProjectModel, int(state["project_id"]))
+            if _proj and _proj.modules_json:
+                _mods = _json.loads(_proj.modules_json)
+                if _mods:
+                    modules_text = "\n\nModules breakdown:\n" + _json.dumps(
+                        [{"title": m["title"], "label": m["label"]} for m in _mods], indent=2
+                    )
+    except Exception:
+        pass
+
     agent = create_react_agent(get_llm(), _PHASE_5_TOOLS)
     _t0 = _time.monotonic()
     agent_result = await agent.ainvoke(
@@ -545,7 +560,8 @@ async def _phase_5_estimate_node(state: ProjectState) -> dict[str, Any]:
                 {
                     "role": "user",
                     "content": (
-                        f"Estimate effort for this project:\n{proposal_summary}\n\n"
+                        f"Estimate effort for this project:\n{proposal_summary}"
+                        f"{modules_text}\n\n"
                         f"Team size: {team_size}\n\n"
                         "1. Use get_historical_projects to get reference data.\n"
                         "2. Use estimate_effort with the proposal summary, team size, and reference projects.\n"

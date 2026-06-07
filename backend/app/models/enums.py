@@ -10,6 +10,7 @@ class ProjectStatus(str, Enum):
 class ProjectPhase(str, Enum):
     redaction = "redaction"
     chat = "chat"
+    modules = "modules"
     techstack = "techstack"
     team = "team"
     estimation = "estimation"
