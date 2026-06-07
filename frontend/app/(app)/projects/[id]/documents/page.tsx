@@ -63,7 +63,7 @@ export default function DocumentsPage({ params }: { params: Promise<{ id: string
   const queryClient = useQueryClient();
   const [deleting, setDeleting] = useState<string | null>(null);
 
-  const { data: docs, isLoading } = useQuery({
+  const { data: docs, isLoading, isError } = useQuery({
     queryKey: ["project-documents", projectId],
     queryFn: async () => {
       const result = await listProjectDocuments(projectId);
@@ -103,6 +103,10 @@ export default function DocumentsPage({ params }: { params: Promise<{ id: string
 
       {isLoading && (
         <p className="text-sm text-text-muted">Loading…</p>
+      )}
+
+      {isError && (
+        <p className="text-sm text-destructive">Failed to load documents. Please refresh.</p>
       )}
 
       {[

@@ -445,12 +445,13 @@ def list_project_documents(
             download_url=f"/api/v1/projects/{project_id}/documents/{doc.id}/download",
         ))
 
-    for proposal in (
+    latest_proposal = (
         db.query(Proposal)
         .filter(Proposal.project_id == project.id)
         .order_by(Proposal.created_at.desc())
-        .all()
-    ):
+        .first()
+    )
+    for proposal in ([latest_proposal] if latest_proposal else []):
         size = None
         if os.path.exists(proposal.content_path):
             size = os.path.getsize(proposal.content_path)
