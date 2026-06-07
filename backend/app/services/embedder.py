@@ -1,8 +1,7 @@
-import os
-
 import chromadb
 from chromadb.utils.embedding_functions import OpenAIEmbeddingFunction
 
+from app.config import settings
 from app.services.ingestion import Chunk
 
 # Locked by ADR-004 — never make these env-configurable
@@ -11,12 +10,12 @@ _EMBEDDING_DIMS = 1536
 
 
 def get_collection(project_id: str) -> chromadb.Collection:
-    client = chromadb.PersistentClient(path=os.environ["CHROMA_PERSIST_PATH"])
+    client = chromadb.PersistentClient(path=settings.chroma_persist_path)
     return client.get_or_create_collection(
         name=f"project_{project_id}",
         metadata={"hnsw:space": "cosine"},
         embedding_function=OpenAIEmbeddingFunction(  # type: ignore[arg-type]
-            api_key=os.environ["OPENAI_API_KEY"],
+            api_key=settings.openai_api_key,
             model_name=_EMBEDDING_MODEL,
             dimensions=_EMBEDDING_DIMS,
         ),
@@ -24,7 +23,7 @@ def get_collection(project_id: str) -> chromadb.Collection:
 
 
 def collection_exists(project_id: str) -> bool:
-    client = chromadb.PersistentClient(path=os.environ["CHROMA_PERSIST_PATH"])
+    client = chromadb.PersistentClient(path=settings.chroma_persist_path)
     existing = [c.name for c in client.list_collections()]
     collection_name = f"project_{project_id}"
     if collection_name not in existing:

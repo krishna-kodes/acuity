@@ -121,6 +121,13 @@ async def detect_and_stage_pii(
     if collection_exists(chroma_project_id):
         return get_collection(chroma_project_id).count()
 
+    from app.models.pii import PIIDetection
+    existing = db.query(PIIDetection).filter(
+        PIIDetection.document_id == document_id
+    ).count()
+    if existing > 0:
+        return existing
+
     parsed = await _parse(file_path)
 
     # Concatenate all page text for PII scanning

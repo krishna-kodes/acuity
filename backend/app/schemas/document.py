@@ -20,6 +20,7 @@ class RedactionDecisionsUpdate(BaseModel):
 
 class RedactionDecisionResponse(BaseModel):
     id: int
+    text_original: str
     text_replacement: str
     pii_type: str
     detection_method: str

@@ -20,6 +20,9 @@ async def parse_pdf(path: str) -> ParsedDocument:
     return ParsedDocument(filename=Path(path).name, pages=pages)
 
 
+_WNS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+
+
 async def parse_docx(path: str) -> ParsedDocument:
     doc = DocxDocument(path)
     text_lines: list[str] = []
@@ -28,16 +31,17 @@ async def parse_docx(path: str) -> ParsedDocument:
     for block in doc.element.body:
         tag = block.tag.split("}")[-1]
         if tag == "p":
-            text = "".join(n.text or "" for n in block.iter())
+            # CT_P/CT_R override .text to return all inner text, causing 3× duplication.
+            # Only collect w:t leaf nodes which hold the actual string values.
+            text = "".join(n.text or "" for n in block.iter(f"{{{_WNS}}}t"))
             if text.strip():
                 text_lines.append(text.strip())
         elif tag == "tbl":
-            ns = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
             rows = []
-            for row in block.iter(f"{{{ns}}}tr"):
+            for row in block.iter(f"{{{_WNS}}}tr"):
                 cells = [
-                    "".join(n.text or "" for n in cell.iter())
-                    for cell in row.iter(f"{{{ns}}}tc")
+                    "".join(n.text or "" for n in cell.iter(f"{{{_WNS}}}t"))
+                    for cell in row.iter(f"{{{_WNS}}}tc")
                 ]
                 rows.append(cells)
             if rows:

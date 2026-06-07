@@ -21,6 +21,9 @@ langchain-core==1.4.1
 langchain-google-genai==4.2.4
 langchain-anthropic==1.4.4
 cryptography==48.0.0
+aiosqlite==0.22.1
+fastmcp==3.4.2
+mcp==1.27.2
 spacy>=3.7.0
 faker>=25.0.0
 rank-bm25==0.2.2

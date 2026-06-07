@@ -42,7 +42,7 @@ class Settings(BaseSettings):
     seed_technology_count: int = 22
     metrics_enabled: bool = True
 
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_file=(".env", "../.env"), extra="ignore")
 
 
 settings = Settings()

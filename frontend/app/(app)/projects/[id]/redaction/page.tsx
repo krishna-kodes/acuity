@@ -11,6 +11,7 @@ import type { RedactionSpan } from "@/components/redaction-highlight";
 
 function mapDetections(raw: Array<{
   id: number;
+  text_original: string;
   text_replacement: string;
   pii_type: string;
   detection_method: string;
@@ -24,7 +25,7 @@ function mapDetections(raw: Array<{
   const METHOD_LABELS: Record<string, string> = { regex: "Regex", ner: "NER" };
   return raw.map((d) => ({
     id: d.id,
-    original: d.text_replacement,
+    original: d.text_original,
     type: TYPE_LABELS[d.pii_type] ?? d.pii_type,
     method: METHOD_LABELS[d.detection_method] ?? d.detection_method,
     placeholder: d.text_replacement,

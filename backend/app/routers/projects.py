@@ -156,17 +156,23 @@ def get_redaction_decisions(
     from app.models.pii import PIIDetection
 
     _get_project_or_404(project_id, db)
-    docs = db.query(Document).filter(Document.project_id == int(project_id)).all()
-    if not docs:
+    latest_doc = (
+        db.query(Document)
+        .filter(Document.project_id == int(project_id))
+        .order_by(Document.upload_ts.desc())
+        .first()
+    )
+    if not latest_doc:
         return []
 
-    doc_ids = [d.id for d in docs]
     detections = (
-        db.query(PIIDetection).filter(PIIDetection.document_id.in_(doc_ids)).all()
+        db.query(PIIDetection).filter(PIIDetection.document_id == latest_doc.id).all()
     )
+    from app.services.pii_detection import decrypt_original
     return [
         RedactionDecisionResponse(
             id=det.id,
+            text_original=decrypt_original(det.text_original),
             text_replacement=det.text_replacement,
             pii_type=det.pii_type,
             detection_method=det.detection_method,
@@ -723,10 +729,10 @@ async def chat(
     body: ChatRequest,
     db: Session = Depends(get_db),
 ) -> StreamingResponse:
-    wf = get_workflow()
+    wf = await get_workflow()
     config = {"configurable": {"thread_id": project_id}}
 
-    existing = wf.get_state(config)
+    existing = await wf.aget_state(config)
     history = list(existing.values.get("chat_messages") or [])
     history.append({"role": "user", "content": body.message})
 
@@ -745,7 +751,7 @@ async def chat(
                 etype = event["event"]
                 name = event.get("name", "")
 
-                if etype == "on_chat_model_stream" and name != "groundedness_judge":
+                if etype == "on_chat_model_stream" and name == "chat_response":
                     token = event["data"]["chunk"].content
                     if token:
                         yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"

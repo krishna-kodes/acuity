@@ -425,6 +425,8 @@ export interface components {
         RedactionDecisionResponse: {
             /** Id */
             id: number;
+            /** Text Original */
+            text_original: string;
             /** Text Replacement */
             text_replacement: string;
             /** Pii Type */
