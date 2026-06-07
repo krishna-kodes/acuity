@@ -165,3 +165,30 @@ export async function updateSyncConfig(projectId: string, config: SyncConfig): P
   if (!res.ok) throw new Error(`Update sync config failed: ${res.status}`)
   return res.json()
 }
+
+// ── Documents tab ─────────────────────────────────────────────────────────────
+
+export const listProjectDocuments = (projectId: string) =>
+  apiClient.GET("/api/v1/projects/{project_id}/documents-list" as never, {
+    params: { path: { project_id: projectId } },
+  } as never) as Promise<{ data?: Array<{
+    id: string;
+    doc_type: "uploaded" | "generated";
+    filename: string;
+    status: string;
+    size_bytes: number | null;
+    created_at: string;
+    download_url: string;
+  }>; error?: unknown }>
+
+export const deleteDocument = (projectId: string, docId: string) =>
+  fetch(
+    `${_apiBase()}/api/v1/projects/${projectId}/documents/${docId}`,
+    { method: "DELETE" }
+  )
+
+export const deleteProposal = (projectId: string, proposalId: string) =>
+  fetch(
+    `${_apiBase()}/api/v1/projects/${projectId}/proposals/${proposalId}`,
+    { method: "DELETE" }
+  )
