@@ -76,3 +76,7 @@ class EpicsOutput(BaseModel):
 class TeamResponse(BaseModel):
     members: list[dict]
     total: int
+
+
+class TeamUpdateRequest(BaseModel):
+    members: list[dict]
