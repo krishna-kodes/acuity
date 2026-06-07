@@ -502,6 +502,16 @@ async def _phase_4_team_node(state: ProjectState) -> dict[str, Any]:
             except (_json.JSONDecodeError, (KeyError, IndexError)):
                 pass
 
+    required = {t.lower() for t in all_technologies}
+
+    def _match_score(member: dict) -> float:
+        if not required:
+            return 0.0
+        skills = {s.lower() for s in member.get("skills", [])}
+        return round(len(skills & required) / len(required), 2)
+
+    members = [{**m, "match_score": _match_score(m)} for m in members]
+
     record_latency(int(state["project_id"]), "phase_4", "team_node", (_time.monotonic() - _t0) * 1000)
     _p4_inp, _p4_out = 0, 0
     for _msg in agent_result.get("messages", []):
