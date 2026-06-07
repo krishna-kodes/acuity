@@ -100,6 +100,15 @@ function IconChart() {
     </svg>
   );
 }
+function IconDocument() {
+  return (
+    <svg className="w-4 h-4" fill="none" viewBox="0 0 16 16" stroke="currentColor" strokeWidth={1.75}>
+      <path d="M4 2h6l3 3v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z" />
+      <path d="M10 2v3h3" />
+      <path d="M5 8h6M5 11h4" strokeLinecap="round" />
+    </svg>
+  );
+}
 
 const GLOBAL_NAV = [
   { key: "dashboard", label: "All Projects", href: "/", icon: <IconDashboard />, phase: null },
@@ -116,6 +125,7 @@ function buildProjectNav(projectId: string) {
     { key: "estimation", label: "Estimation", href: `${base}/estimation`, icon: <IconCalculator />, phase: "estimation" },
     { key: "epics", label: "Epics & Tasks", href: `${base}/epics`, icon: <IconList />, phase: "epics" },
     { key: "metrics", label: "Metrics", href: `${base}/metrics`, icon: <IconChart />, phase: null },
+    { key: "documents", label: "Documents", href: `${base}/documents`, icon: <IconDocument />, phase: null },
   ];
 }
 

@@ -1,5 +1,6 @@
 import json
 import os
+from urllib.parse import quote
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
@@ -18,6 +19,7 @@ from app.models.sync import Epic, Task
 from app.schemas.clarification import ClarificationCreate, ClarificationResponse
 from app.schemas.document import (
     DocumentResponse,
+    ProjectDocumentItem,
     RedactionDecisionResponse,
     RedactionDecisionsUpdate,
     RedactionSummaryResponse,
@@ -414,6 +416,134 @@ def export_proposal(
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         headers={"Content-Disposition": f"attachment; filename=proposal_{project_id}.docx"},
     )
+
+
+@router.get(
+    "/projects/{project_id}/documents-list",
+    response_model=list[ProjectDocumentItem],
+)
+def list_project_documents(
+    project_id: str,
+    db: Session = Depends(get_db),
+) -> list[ProjectDocumentItem]:
+    """Return all uploaded docs + generated proposals for a project."""
+    project = _get_project_or_404(project_id, db)
+    items: list[ProjectDocumentItem] = []
+
+    for doc in db.query(Document).filter(Document.project_id == project.id).all():
+        file_path = f"documents/{project.id}_{doc.filename}"
+        size = None
+        if os.path.exists(file_path):
+            size = os.path.getsize(file_path)
+        items.append(ProjectDocumentItem(
+            id=str(doc.id),
+            doc_type="uploaded",
+            filename=doc.filename,
+            status=doc.status.value,
+            size_bytes=size,
+            created_at=doc.upload_ts.isoformat(),
+            download_url=f"/api/v1/projects/{project_id}/documents/{doc.id}/download",
+        ))
+
+    latest_proposal = (
+        db.query(Proposal)
+        .filter(Proposal.project_id == project.id)
+        .order_by(Proposal.created_at.desc())
+        .first()
+    )
+    for proposal in ([latest_proposal] if latest_proposal else []):
+        size = None
+        if os.path.exists(proposal.content_path):
+            size = os.path.getsize(proposal.content_path)
+        items.append(ProjectDocumentItem(
+            id=str(proposal.id),
+            doc_type="generated",
+            filename=os.path.basename(proposal.content_path),
+            status="ready",
+            size_bytes=size,
+            created_at=proposal.created_at.isoformat(),
+            download_url=f"/api/v1/projects/{project_id}/export/proposal",
+        ))
+
+    return sorted(items, key=lambda x: x.created_at, reverse=True)
+
+
+@router.get("/projects/{project_id}/documents/{doc_id}/download")
+def download_document(
+    project_id: str,
+    doc_id: str,
+    db: Session = Depends(get_db),
+) -> FileResponse:
+    """Download the original uploaded requirements document."""
+    _get_project_or_404(project_id, db)
+    try:
+        doc = db.query(Document).filter(
+            Document.id == int(doc_id),
+            Document.project_id == int(project_id),
+        ).first()
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Document not found")
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    file_path = f"documents/{project_id}_{doc.filename}"
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="File not found on disk")
+    return FileResponse(
+        file_path,
+        media_type="application/octet-stream",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(doc.filename)}"},
+    )
+
+
+@router.delete("/projects/{project_id}/documents/{doc_id}", status_code=204)
+def delete_document(
+    project_id: str,
+    doc_id: str,
+    db: Session = Depends(get_db),
+) -> None:
+    """Delete an uploaded document record and its file on disk."""
+    _get_project_or_404(project_id, db)
+    try:
+        doc = db.query(Document).filter(
+            Document.id == int(doc_id),
+            Document.project_id == int(project_id),
+        ).first()
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Document not found")
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    file_path = f"documents/{project_id}_{doc.filename}"
+    try:
+        os.remove(file_path)
+    except OSError:
+        pass
+    db.delete(doc)
+    db.commit()
+
+
+@router.delete("/projects/{project_id}/proposals/{proposal_id}", status_code=204)
+def delete_proposal(
+    project_id: str,
+    proposal_id: str,
+    db: Session = Depends(get_db),
+) -> None:
+    """Delete a generated proposal record and its DOCX file on disk."""
+    _get_project_or_404(project_id, db)
+    try:
+        proposal = db.query(Proposal).filter(
+            Proposal.id == int(proposal_id),
+            Proposal.project_id == int(project_id),
+        ).first()
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Proposal not found")
+    if not proposal:
+        raise HTTPException(status_code=404, detail="Proposal not found")
+    try:
+        os.remove(proposal.content_path)
+    except OSError:
+        pass
+    db.delete(proposal)
+    db.commit()
 
 
 @router.post("/projects/{project_id}/stack", response_model=TechStackResponse)
