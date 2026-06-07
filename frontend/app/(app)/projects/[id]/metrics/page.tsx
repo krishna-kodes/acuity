@@ -103,10 +103,10 @@ function TabTokens() {
   return (
     <div className="flex flex-col gap-5">
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <MetricsStatCard label="Total Tokens"   value={totalTokens.toLocaleString()} />
+        <MetricsStatCard label="Total Tokens"   value={totalTokens.toLocaleString('en-US')} />
         <MetricsStatCard label="Total Cost"     value={`$${totalCost.toFixed(3)}`} unit="USD" delta={{ value: "-8% vs last run", direction: "down" }} />
-        <MetricsStatCard label="Input Tokens"   value={(totalTokens * 0.78).toLocaleString().split(".")[0]} />
-        <MetricsStatCard label="Output Tokens"  value={(totalTokens * 0.22).toLocaleString().split(".")[0]} />
+        <MetricsStatCard label="Input Tokens"   value={Math.floor(totalTokens * 0.78).toLocaleString('en-US')} />
+        <MetricsStatCard label="Output Tokens"  value={Math.floor(totalTokens * 0.22).toLocaleString('en-US')} />
       </div>
       <Card>
         <SectionLabel>Daily Token Trend</SectionLabel>

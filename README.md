@@ -8,8 +8,8 @@ A capstone AI engineering project. PMs upload requirements documents, refine the
 
 ## Prerequisites
 
-- Node 20+ �� use `nvm use` (reads `.nvmrc`)
-- Python 3.11+ — use `pyenv` (reads `.python-version`)
+- Python **3.11.14** — `pyenv install 3.11.14` (reads `.python-version`)
+- Node **22.17.0** — `nvm install` (reads `.nvmrc`)
 - `OPENAI_API_KEY` and `GOOGLE_API_KEY` (minimum to run)
 
 ---
@@ -26,22 +26,16 @@ cp .env.example .env
 ```
 
 ```bash
-# 2. Frontend
-cd frontend
-nvm use
-npm install
-npm run dev
-# → http://localhost:3000
+# 2. Install all dependencies (venv + pip lock + spaCy model + npm)
+make setup
 ```
 
 ```bash
-# 3. Backend (new terminal)
-cd backend
-python -m venv .venv
-source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-uvicorn app.main:app --reload --port 8000
-# → http://localhost:8000/docs
+# 3. Activate backend venv, then start servers
+source backend/.venv/bin/activate
+make dev-be   # → http://localhost:8000/docs
+make dev-fe   # → http://localhost:3000  (new terminal)
+# or: make dev  (both at once, requires: npm i -g concurrently)
 ```
 
 ---

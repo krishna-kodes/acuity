@@ -27,7 +27,7 @@ from app.models.employee import Employee, EmployeeSkill, Skill
 from app.models.reference import ApprovedTechnology, HistoricalProject
 from app.services.llm_factory import get_llm
 from app.services.rag import retrieve
-from app.services.tbd_detection import detect_tbds
+from app.services.tbd_detection import detect_tbds, persist_tbds
 
 # ---------------------------------------------------------------------------
 # State
@@ -282,6 +282,8 @@ async def _chat_turn_node(state: ProjectState) -> dict[str, Any]:
 
     known = {t.get("text", "") for t in (state.get("tbd_items") or [])}
     new_tbds = await detect_tbds(last_user, chunks, known_tbds=known)
+    if new_tbds:
+        persist_tbds(int(project_id), new_tbds)
 
     lc_messages = [
         SystemMessage(content=f"Answer using only this context:\n\n{context}"),
@@ -317,10 +319,39 @@ async def _chat_turn_node(state: ProjectState) -> dict[str, Any]:
 
 
 async def _phase_2_complete_node(state: ProjectState) -> dict[str, Any]:
-    """Marks Phase 2 complete when PM clicks Proceed."""
+    """Marks Phase 2 complete. Runs L3/L4 deep scan once across full corpus."""
+    from app.services.embedder import get_collection
+    from app.services.tbd_detection import detect_level_3, detect_level_4
+
     ps = dict(state.get("phase_status") or {})
     ps["phase_2"] = "complete"
-    return {"phase_status": ps}
+
+    project_id = state["project_id"]
+    known = {t.get("text", "") for t in (state.get("tbd_items") or [])}
+
+    try:
+        col = get_collection(project_id)
+        raw = col.get(include=["documents", "metadatas"])
+        all_chunks = [
+            {"text": d, **(m or {})}
+            for d, m in zip(raw["documents"] or [], raw["metadatas"] or [])
+        ]
+    except Exception:
+        all_chunks = []
+
+    deep_tbds: list[dict] = []
+    if all_chunks:
+        level3 = await detect_level_3(all_chunks)
+        level4 = await detect_level_4(all_chunks, known_tbds=known)
+        deep_tbds = level3 + level4
+
+    if deep_tbds:
+        persist_tbds(int(project_id), deep_tbds)
+
+    return {
+        "phase_status": ps,
+        "tbd_items": list(state.get("tbd_items") or []) + deep_tbds,
+    }
 
 
 # Alias used by tests written against earlier node naming

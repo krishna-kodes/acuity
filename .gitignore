@@ -47,3 +47,8 @@ results/*.json
 .idea/
 *.swp
 *.swo
+
+# Claude Code
+.agents/
+.claude/
+skills-lock.json

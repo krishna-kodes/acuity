@@ -1,4 +1,5 @@
 .PHONY: help \
+	setup \
 	dev dev-fe dev-be \
 	install install-fe install-be \
 	build lint test \
@@ -8,6 +9,10 @@
 	evals \
 	clean
 
+VENV := backend/.venv
+PY   := $(VENV)/bin/python
+PIP  := $(VENV)/bin/pip
+
 # ── default ──────────────────────────────────────────────────────────────────
 
 help:
@@ -16,13 +21,25 @@ help:
 
 # ── install ───────────────────────────────────────────────────────────────────
 
+setup: ## First-time setup: venv + all deps + spaCy model
+	@echo "Python: $$(python3 --version) | expected 3.11.14 (use pyenv)"
+	@echo "Node:   $$(node --version)   | expected 22.17.0 (use nvm)"
+	cd backend && python3 -m venv .venv && \
+		. .venv/bin/activate && \
+		pip install --upgrade pip && \
+		pip install -r requirements-dev.txt && \
+		python3 -m spacy download en_core_web_sm
+	cd frontend && npm install
+	@echo "Setup complete. Activate venv: source backend/.venv/bin/activate"
+
 install: install-fe install-be ## Install all dependencies
 
 install-fe: ## Install frontend dependencies
 	cd frontend && npm install
 
 install-be: ## Install backend dependencies
-	pip install -r backend/requirements-dev.txt
+	$(PIP) install -r backend/requirements-dev.txt
+	$(PY) -m spacy download en_core_web_sm
 
 # ── dev servers ───────────────────────────────────────────────────────────────
 
@@ -36,7 +53,7 @@ dev-fe: ## Start Next.js dev server (http://localhost:3000)
 	cd frontend && npm run dev
 
 dev-be: ## Start FastAPI dev server (http://localhost:8000)
-	cd backend && uvicorn app.main:app --reload --port 8000
+	cd backend && . .venv/bin/activate && uvicorn app.main:app --reload --port 8000
 
 # ── build ─────────────────────────────────────────────────────────────────────
 
@@ -51,7 +68,7 @@ lint-fe: ## ESLint on frontend
 	cd frontend && npm run lint
 
 lint-be: ## Ruff on backend
-	cd backend && ruff check app tests
+	cd backend && .venv/bin/ruff check app tests
 
 # ── typecheck ─────────────────────────────────────────────────────────────────
 
@@ -59,30 +76,30 @@ typecheck-fe: ## TypeScript type check (no emit)
 	cd frontend && npx tsc --noEmit
 
 typecheck-be: ## Mypy on backend
-	cd backend && mypy app
+	cd backend && .venv/bin/mypy app
 
 # ── test ──────────────────────────────────────────────────────────────────────
 
 test: test-be typecheck-fe ## Run all tests
 
 test-be: ## Pytest on backend
-	cd backend && pytest -v
+	cd backend && .venv/bin/pytest -v
 
 test-be-fast: ## Pytest, stop on first failure
-	cd backend && pytest -x -v
+	cd backend && .venv/bin/pytest -x -v
 
 # ── database ──────────────────────────────────────────────────────────────────
 
 db-migrate: ## Generate a new Alembic migration (MSG="description")
-	cd backend && alembic revision --autogenerate -m "$(MSG)"
+	cd backend && .venv/bin/alembic revision --autogenerate -m "$(MSG)"
 
 db-upgrade: ## Apply pending Alembic migrations
-	cd backend && alembic upgrade head
+	cd backend && .venv/bin/alembic upgrade head
 
 db-reset: ## **DESTRUCTIVE** drop app.db and reapply all migrations
 	@echo "WARNING: This will delete backend/app.db"; \
 	read -p "Continue? [y/N] " ans; \
-	[ "$$ans" = "y" ] && cd backend && rm -f app.db && alembic upgrade head || echo "Aborted."
+	[ "$$ans" = "y" ] && cd backend && rm -f app.db && .venv/bin/alembic upgrade head || echo "Aborted."
 
 # ── seed ──────────────────────────────────────────────────────────────────────
 
@@ -96,10 +113,10 @@ seed-reset: ## Reset DB then reseed
 # ── evals ─────────────────────────────────────────────────────────────────────
 
 evals: ## Run eval suite (CI gate at 90%)
-	python eval_suite.py --threshold 0.90
+	$(PY) eval_suite.py --threshold 0.90
 
 evals-baseline: ## Run baseline eval (save as results/baseline_eval_run_001.json)
-	python eval_suite.py --threshold 0.0 --output results/baseline_eval_run_001.json
+	$(PY) eval_suite.py --threshold 0.0 --output results/baseline_eval_run_001.json
 
 # ── clean ─────────────────────────────────────────────────────────────────────
 

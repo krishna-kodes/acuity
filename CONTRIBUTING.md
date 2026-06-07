@@ -25,6 +25,7 @@
 
 Before writing any code:
 
+- [ ] **Correct versions?** Run `python3 --version` (expect 3.11.14) and `node --version` (expect 22.17.0). Use `pyenv` and `nvm` — both read the pinned files (`.python-version`, `.nvmrc`).
 - [ ] **Dependency merged?** Confirm the blocking epic's issues are merged to `main` (see dependency map below). If not, add `blocked` label and wait.
 - [ ] **Pull latest main** and create your branch:
   ```bash
