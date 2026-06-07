@@ -276,3 +276,17 @@ export async function approveProposal(projectId: string): Promise<ProposalData> 
   if (!res.ok) throw new Error(`Approve failed: ${res.status}`)
   return res.json()
 }
+
+// ── Redaction helpers ─────────────────────────────────────────────────────────
+
+export async function piiLlmFilter(projectId: string): Promise<{ candidates_sent: number; kept: number; pruned: number }> {
+  const res = await fetch(`${_apiBase()}/api/v1/projects/${projectId}/pii-llm-filter`, { method: "POST" })
+  if (!res.ok) throw new Error(`LLM filter failed: ${res.status}`)
+  return res.json()
+}
+
+export async function getDocumentStatus(projectId: string): Promise<{ status: string; project_phase: string }> {
+  const res = await fetch(`${_apiBase()}/api/v1/projects/${projectId}/document-status`)
+  if (!res.ok) throw new Error(`Status check failed: ${res.status}`)
+  return res.json()
+}
