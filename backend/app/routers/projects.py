@@ -56,6 +56,11 @@ _POST_MODULES_PHASES = {
     ProjectPhase.techstack, ProjectPhase.team, ProjectPhase.estimation,
     ProjectPhase.epics, ProjectPhase.complete,
 }
+# Phases that mean phase 3 (tech stack) is complete
+_POST_STACK_PHASES = {
+    ProjectPhase.techstack, ProjectPhase.team, ProjectPhase.estimation,
+    ProjectPhase.epics, ProjectPhase.complete,
+}
 # Phases that mean phase 4 (team) is complete
 _POST_TEAM_PHASES = {
     ProjectPhase.team, ProjectPhase.estimation, ProjectPhase.epics, ProjectPhase.complete,
@@ -974,10 +979,11 @@ async def suggest_stack(
     tech_stack: dict = {}
     try:
         from app.services.workflow import run_phase
-        state = await run_phase(str(project.id))
+        # Ensure chat_proceed=True so the workflow exits the chat loop on resume
+        state = await run_phase(str(project.id), state_update={"chat_proceed": True})
         tech_stack = state.get("tech_stack") or {}
-    except Exception:
-        pass
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Tech stack suggestion failed: {exc}") from exc
 
     project.tech_stack = tech_stack
     db.commit()
@@ -1002,13 +1008,19 @@ async def suggest_team(
 ) -> TeamResponse:
     project = _get_project_or_404(project_id, db)
 
+    if project.phase not in _POST_STACK_PHASES:
+        raise HTTPException(
+            status_code=409,
+            detail="Phase 3 (tech stack suggestion) must be complete before running team suggestion",
+        )
+
     team: dict = {}
     try:
         from app.services.workflow import run_phase
         state = await run_phase(str(project.id))
         team = state.get("team_suggestion") or {}
-    except Exception:
-        pass
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Team suggestion failed: {exc}") from exc
 
     project.team_suggestion = team
     if project.phase == ProjectPhase.techstack:
