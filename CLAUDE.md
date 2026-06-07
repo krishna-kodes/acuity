@@ -274,7 +274,7 @@ Never call ChromaDB client methods directly from phase nodes — always go throu
 
 ### PII Detection
 
-Two-pass: regex first (`PII_REGEX_ENABLED`), then spaCy NER (`PII_NER_ENABLED`). Gate controlled by `PII_REVIEW_GATE=true`. TBD detection in Phase 2 covers Level 1 (explicit) and Level 2 (vague) only.
+Two-pass: regex first (`PII_REGEX_ENABLED`), then spaCy NER (`PII_NER_ENABLED`). Gate controlled by `PII_REVIEW_GATE=true`. TBD detection in Phase 2 covers all 4 levels: Level 1 (explicit), Level 2 (vague), Level 3 (missing sections), Level 4 (contradictions). GitHub milestones #8 and #9 track implementation.
 
 ---
 
@@ -488,3 +488,18 @@ Add to `.gitignore`: `.env`, `chroma_db/`, `project_state.db`, `app.db`, `docume
 | Observability provider | Both LangSmith and Langfuse configured via env — decision pending |
 | Google Drive source documents folder path | Not yet recorded — ask Krishna |
 | DOCX export versioning (v1, v2) | Not yet specified |
+
+---
+
+## Promoted to MVP (June 2026)
+
+Previously post-MVP; now in-scope. GitHub milestones created.
+
+| Item | Milestone | Issues |
+|------|-----------|--------|
+| TBD Detection Level 3 — missing sections | #8 | #90–#93 |
+| TBD Detection Level 4 — contradictions | #9 | #94–#97 |
+| GitHub Projects V2 GraphQL (`GITHUB_USE_PROJECTS_V2=true`) | #10 | #98–#101 |
+| Generic Sync Provider — Jira + GitHub abstraction (`sync_factory.py`) | #11 | #102–#108 |
+
+For Jira sync: use `atlassian-python-api` (not `mcp-atlassian` — subprocess-only, not importable). Wrap in `backend/app/mcp/jira_server.py` FastMCP server. Provider resolved at runtime via `backend/app/services/sync_factory.py`. Rule 10 ("GitHub MCP only") is superseded — both GitHub and Jira sync are now in-scope.
