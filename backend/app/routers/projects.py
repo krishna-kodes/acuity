@@ -1,3 +1,4 @@
+import dataclasses
 import json
 import os
 import re
@@ -37,7 +38,7 @@ from app.schemas.project import (
     TeamUpdateRequest,
     phase_to_int,
 )
-from app.schemas.proposal import ProposalResponse
+from app.schemas.proposal import ProposalResponse, ProposalRetryRequest, ProposalSectionOut
 from app.schemas.sync import SyncConfigRequest, SyncConfigResponse, SyncProvider, SyncResponse
 from app.services.ingestion import ingest_document
 from app.services.workflow import get_workflow
@@ -122,6 +123,137 @@ def _parse_proposal_sections(title: str, text: str) -> "ProposalContent":
         sections = [ProposalSection(heading="Requirements", body=text.strip())]
 
     return ProposalContent(title=title, sections=sections)
+
+
+def _proposal_to_response(proposal: "Proposal", project_id: str) -> ProposalResponse:
+    sections: list[ProposalSectionOut] = []
+    if proposal.content_json:
+        try:
+            raw = json.loads(proposal.content_json)
+            sections = [ProposalSectionOut(**s) for s in raw.get("sections", [])]
+        except Exception:
+            pass
+    return ProposalResponse(
+        id=str(proposal.id),
+        project_id=project_id,
+        content_path=proposal.content_path,
+        created_at=proposal.created_at.isoformat(),
+        sections=sections,
+    )
+
+
+async def _run_proposal_generation(
+    project: "Project",
+    db: Session,
+    extra_feedback: str = "",
+) -> "Proposal":
+    """Build prompt, call LLM, persist DOCX + Proposal row. Does NOT advance phase."""
+    from app.services.exporter import generate_proposal_docx
+    from app.services.rag import retrieve
+    from app.services.llm_factory import get_llm
+    from app.models.clarification import Clarification
+
+    # 1. Gather document chunks via RAG
+    try:
+        chunks, _scores, _n = await retrieve(
+            str(project.id),
+            "project requirements scope objectives features",
+            top_k=12,
+            top_n=12,
+        )
+        doc_context = "\n\n---\n\n".join(c.get("text", "") for c in chunks)
+    except Exception:
+        doc_context = ""
+
+    # 2. Resolved clarifications
+    resolved = (
+        db.query(Clarification)
+        .filter(
+            Clarification.project_id == project.id,
+            Clarification.status == TBDStatus.answered,
+        )
+        .all()
+    )
+    clarification_context = "\n".join(
+        f"- [{c.level}] {c.title}: {c.answer}" for c in resolved if c.answer
+    ) or "None"
+
+    open_items = (
+        db.query(Clarification)
+        .filter(
+            Clarification.project_id == project.id,
+            Clarification.status.in_([TBDStatus.open, TBDStatus.tbd]),
+        )
+        .all()
+    )
+    open_context = "\n".join(f"- {c.title}" for c in open_items) or "None"
+
+    # 3. Chat messages from LangGraph state
+    chat_context = "No chat history available."
+    try:
+        wf = await get_workflow()
+        config = {"configurable": {"thread_id": str(project.id)}}
+        state_snapshot = await wf.aget_state(config)
+        if state_snapshot:
+            chat_msgs = state_snapshot.values.get("chat_messages", [])
+            if chat_msgs:
+                chat_context = "\n".join(
+                    f"{m['role'].upper()}: {m['content']}"
+                    for m in chat_msgs[-10:]
+                )
+    except Exception:
+        pass
+
+    # 4. Build prompt
+    feedback_block = (
+        f"\n\n## Revision Feedback\n{extra_feedback}" if extra_feedback else ""
+    )
+    llm = get_llm()
+    prompt = (
+        f'You are a senior business analyst. Write a formal requirements proposal document '
+        f'for the project "{project.name}".\n\n'
+        f"## Source Document Excerpts\n{doc_context or 'No document context available.'}\n\n"
+        f"## Resolved Clarifications\n{clarification_context}\n\n"
+        f"## Recent Chat Refinements\n{chat_context}\n\n"
+        f"## Open Items\n{open_context}"
+        f"{feedback_block}\n\n"
+        "Write a professional proposal with these exact sections using '## ' headings:\n"
+        "## Executive Summary\n"
+        "## Project Scope & Objectives\n"
+        "## Functional Requirements\n"
+        "## Non-Functional Requirements\n"
+        "## Resolved Items\n"
+        "## Open Items & Assumptions\n\n"
+        "Be specific. Use information from the document excerpts. "
+        "Do not invent requirements not present in the source."
+    )
+
+    try:
+        response = await llm.ainvoke([{"role": "user", "content": prompt}])
+        generated_text = response.content if hasattr(response, "content") else str(response)
+    except Exception as exc:
+        generated_text = (
+            f"## Executive Summary\nProposal generation encountered an error: {exc}\n\n"
+            f"## Project Scope & Objectives\n{doc_context[:500] if doc_context else 'See source document.'}"
+        )
+
+    # 5. Build structured content and write DOCX
+    content = _parse_proposal_sections(project.name, generated_text)
+    content_path = generate_proposal_docx(project.id, content)
+
+    # 6. Persist proposal row with content_json
+    doc = db.query(Document).filter(Document.project_id == project.id).first()
+    content_dict = dataclasses.asdict(content)
+    proposal = Proposal(
+        project_id=project.id,
+        document_id=doc.id if doc else 0,
+        content_path=content_path,
+        content_json=json.dumps(content_dict),
+    )
+    db.add(proposal)
+    db.commit()
+    db.refresh(proposal)
+    return proposal
 
 
 @router.get("/projects", response_model=list[ProjectResponse])
@@ -398,115 +530,9 @@ async def generate_proposal(
     project_id: str,
     db: Session = Depends(get_db),
 ) -> ProposalResponse:
-    from app.services.exporter import generate_proposal_docx
-    from app.services.rag import retrieve
-    from app.services.llm_factory import get_llm
-    from app.models.clarification import Clarification
-
     project = _get_project_or_404(project_id, db)
-
-    # 1. Gather document chunks via RAG
-    try:
-        chunks = await retrieve(
-            str(project.id),
-            "project requirements scope objectives features",
-            top_k=12,
-            top_n=12,
-        )
-        doc_context = "\n\n---\n\n".join(c.get("text", "") for c in chunks)
-    except Exception:
-        doc_context = ""
-
-    # 2. Resolved clarifications
-    resolved = (
-        db.query(Clarification)
-        .filter(
-            Clarification.project_id == project.id,
-            Clarification.status == TBDStatus.answered,
-        )
-        .all()
-    )
-    clarification_context = "\n".join(
-        f"- [{c.level}] {c.title}: {c.answer}" for c in resolved if c.answer
-    ) or "None"
-
-    open_items = (
-        db.query(Clarification)
-        .filter(
-            Clarification.project_id == project.id,
-            Clarification.status.in_([TBDStatus.open, TBDStatus.tbd]),
-        )
-        .all()
-    )
-    open_context = "\n".join(f"- {c.title}" for c in open_items) or "None"
-
-    # 3. Chat messages from LangGraph state
-    chat_context = "No chat history available."
-    try:
-        wf = await get_workflow()
-        config = {"configurable": {"thread_id": str(project.id)}}
-        state_snapshot = await wf.aget_state(config)
-        if state_snapshot:
-            chat_msgs = state_snapshot.values.get("chat_messages", [])
-            if chat_msgs:
-                chat_context = "\n".join(
-                    f"{m['role'].upper()}: {m['content']}"
-                    for m in chat_msgs[-10:]
-                )
-    except Exception:
-        pass
-
-    # 4. Generate proposal with LLM
-    llm = get_llm()
-    prompt = (
-        f'You are a senior business analyst. Write a formal requirements proposal document '
-        f'for the project "{project.name}".\n\n'
-        f"## Source Document Excerpts\n{doc_context or 'No document context available.'}\n\n"
-        f"## Resolved Clarifications\n{clarification_context}\n\n"
-        f"## Recent Chat Refinements\n{chat_context}\n\n"
-        f"## Open Items\n{open_context}\n\n"
-        "Write a professional proposal with these exact sections using '## ' headings:\n"
-        "## Executive Summary\n"
-        "## Project Scope & Objectives\n"
-        "## Functional Requirements\n"
-        "## Non-Functional Requirements\n"
-        "## Resolved Items\n"
-        "## Open Items & Assumptions\n\n"
-        "Be specific. Use information from the document excerpts. "
-        "Do not invent requirements not present in the source."
-    )
-
-    try:
-        response = await llm.ainvoke([{"role": "user", "content": prompt}])
-        generated_text = response.content if hasattr(response, "content") else str(response)
-    except Exception as exc:
-        generated_text = (
-            f"## Executive Summary\nProposal generation encountered an error: {exc}\n\n"
-            f"## Project Scope & Objectives\n{doc_context[:500] if doc_context else 'See source document.'}"
-        )
-
-    # 5. Build structured content and write DOCX
-    content = _parse_proposal_sections(project.name, generated_text)
-    content_path = generate_proposal_docx(project.id, content)
-
-    # 6. Persist proposal + advance phase
-    doc = db.query(Document).filter(Document.project_id == project.id).first()
-    proposal = Proposal(
-        project_id=project.id,
-        document_id=doc.id if doc else 0,
-        content_path=content_path,
-    )
-    db.add(proposal)
-    project.phase = ProjectPhase.techstack
-    db.commit()
-    db.refresh(proposal)
-
-    return ProposalResponse(
-        id=str(proposal.id),
-        project_id=project_id,
-        content_path=proposal.content_path,
-        created_at=proposal.created_at.isoformat(),
-    )
+    proposal = await _run_proposal_generation(project, db)
+    return _proposal_to_response(proposal, project_id)
 
 
 @router.get("/projects/{project_id}/proposal", response_model=ProposalResponse)
@@ -525,12 +551,37 @@ def get_proposal(
     if not proposal:
         raise HTTPException(status_code=404, detail="No proposal found for this project")
 
-    return ProposalResponse(
-        id=str(proposal.id),
-        project_id=project_id,
-        content_path=proposal.content_path,
-        created_at=proposal.created_at.isoformat(),
+    return _proposal_to_response(proposal, project_id)
+
+
+@router.post("/projects/{project_id}/proposal/retry", response_model=ProposalResponse, status_code=201)
+async def retry_proposal(
+    project_id: str,
+    body: ProposalRetryRequest,
+    db: Session = Depends(get_db),
+) -> ProposalResponse:
+    project = _get_project_or_404(project_id, db)
+    proposal = await _run_proposal_generation(project, db, extra_feedback=body.comment)
+    return _proposal_to_response(proposal, project_id)
+
+
+@router.post("/projects/{project_id}/proposal/approve", response_model=ProposalResponse)
+def approve_proposal(
+    project_id: str,
+    db: Session = Depends(get_db),
+) -> ProposalResponse:
+    project = _get_project_or_404(project_id, db)
+    proposal = (
+        db.query(Proposal)
+        .filter(Proposal.project_id == project.id)
+        .order_by(Proposal.created_at.desc())
+        .first()
     )
+    if not proposal:
+        raise HTTPException(status_code=404, detail="No proposal to approve")
+    project.phase = ProjectPhase.techstack
+    db.commit()
+    return _proposal_to_response(proposal, project_id)
 
 
 @router.get("/projects/{project_id}/export/proposal")
