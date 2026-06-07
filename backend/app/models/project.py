@@ -31,6 +31,8 @@ class Project(Base):
     tech_stack: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     team_suggestion: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     effort_estimates: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    sync_provider: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    sync_config: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     documents: Mapped[list["Document"]] = relationship(back_populates="project")
     proposals: Mapped[list["Proposal"]] = relationship(back_populates="project")

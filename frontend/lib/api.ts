@@ -72,10 +72,13 @@ export const estimateEffort = (projectId: string) =>
     params: { path: { project_id: projectId } },
   })
 
-export const syncToGitHub = (projectId: string) =>
+export const syncToProvider = (projectId: string) =>
   apiClient.POST("/api/v1/projects/{project_id}/sync", {
     params: { path: { project_id: projectId } },
   })
+
+/** @deprecated Use syncToProvider */
+export const syncToGitHub = syncToProvider
 
 export const getMetrics = (projectId: string) =>
   apiClient.GET("/api/v1/projects/{project_id}/metrics", {
@@ -128,8 +131,37 @@ export async function triggerEpics(projectId: string): Promise<{ epics: Array<{ 
   return res.json()
 }
 
-export async function getEpics(projectId: string): Promise<{ epics: Array<{ id: number; title: string; description: string; sync_status: string; github_milestone_number: number | null; github_milestone_url: string | null; tasks: Array<{ id: number; title: string; description: string; story_points: number; labels: string[]; sync_status: string; github_issue_number: number | null; github_issue_url: string | null }> }> }> {
+export async function getEpics(projectId: string): Promise<{ epics: Array<{ id: number; title: string; description: string; sync_status: string; github_milestone_number: number | null; github_milestone_url: string | null; tracker_ref: string | null; tracker_url: string | null; tracker_type: string | null; tasks: Array<{ id: number; title: string; description: string; story_points: number; labels: string[]; sync_status: string; github_issue_number: number | null; github_issue_url: string | null; tracker_ref: string | null; tracker_url: string | null; tracker_type: string | null }> }> }> {
   const res = await fetch(`${_apiBase()}/api/v1/projects/${projectId}/epics`)
   if (!res.ok) throw new Error(`Fetch epics failed: ${res.status}`)
+  return res.json()
+}
+
+export type SyncProvider = "github" | "jira"
+
+export type SyncConfig = {
+  provider?: SyncProvider
+  github_repo?: string
+  jira_project_key?: string
+}
+
+export type SyncConfigResponse = {
+  provider: SyncProvider
+  config: SyncConfig
+}
+
+export async function getSyncConfig(projectId: string): Promise<SyncConfigResponse> {
+  const res = await fetch(`${_apiBase()}/api/v1/projects/${projectId}/sync-config`)
+  if (!res.ok) throw new Error(`Fetch sync config failed: ${res.status}`)
+  return res.json()
+}
+
+export async function updateSyncConfig(projectId: string, config: SyncConfig): Promise<SyncConfigResponse> {
+  const res = await fetch(`${_apiBase()}/api/v1/projects/${projectId}/sync-config`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(config),
+  })
+  if (!res.ok) throw new Error(`Update sync config failed: ${res.status}`)
   return res.json()
 }

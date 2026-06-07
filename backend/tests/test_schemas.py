@@ -16,7 +16,7 @@ def test_project_create_fields():
 
 def test_project_response_fields():
     p = ProjectResponse(
-        id="abc", name="Test", status="draft",
+        id="abc", name="Test", domain=None, status="draft",
         current_phase=1, created_at="2026-01-01T00:00:00Z"
     )
     assert p.current_phase == 1

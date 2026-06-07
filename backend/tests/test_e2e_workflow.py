@@ -310,8 +310,8 @@ class TestGitHubSync:
 
         assert resp.status_code == 200
         mock_sync.assert_called_once()
-        call_kwargs = mock_sync.call_args.kwargs
-        epics_arg = call_kwargs["epics"]
+        # Router calls via factory lambda as positional args: (epics, config)
+        epics_arg = mock_sync.call_args.args[0]
         assert len(epics_arg) == 2
         assert epics_arg[0]["title"] == "Authentication"
         # Each epic has tasks

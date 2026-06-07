@@ -10,6 +10,22 @@ class SyncStatus(str, Enum):
     failed = "failed"
 
 
+class SyncProvider(str, Enum):
+    github = "github"
+    jira = "jira"
+
+
+class SyncConfigRequest(BaseModel):
+    provider: SyncProvider | None = None
+    github_repo: str | None = None
+    jira_project_key: str | None = None
+
+
+class SyncConfigResponse(BaseModel):
+    provider: SyncProvider
+    config: SyncConfigRequest
+
+
 class SyncResponse(BaseModel):
     synced: int
     skipped: int

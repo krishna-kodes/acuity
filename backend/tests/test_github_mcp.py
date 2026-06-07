@@ -8,7 +8,7 @@ import respx
 from httpx import Response
 
 import app.mcp.github_server as gh_server
-from app.schemas.sync import SyncStatus
+from app.schemas.sync import SyncConfigRequest, SyncStatus
 from app.services.github_sync import sync_epics_to_github
 
 MILESTONE_PAYLOAD = {
@@ -117,7 +117,7 @@ def test_create_milestone_raises_on_http_error():
 
 @respx.mock
 def test_sync_epics_empty_list():
-    result = sync_epics_to_github(epics=[])
+    result = sync_epics_to_github(epics=[], config=SyncConfigRequest())
     assert result == {"synced": 0, "skipped": 0, "failed": 0, "status": SyncStatus.synced}
 
 
@@ -140,7 +140,7 @@ def test_sync_one_epic_two_tasks():
             ],
         }
     ]
-    result = sync_epics_to_github(epics=epics)
+    result = sync_epics_to_github(epics=epics, config=SyncConfigRequest())
     # 1 milestone + 2 issues = 3 synced
     assert result["synced"] == 3
     assert result["failed"] == 0
@@ -160,7 +160,7 @@ def test_sync_milestone_failure_skips_tasks():
             "tasks": [{"title": "T1", "body": "", "labels": ["task"], "assignees": []}],
         }
     ]
-    result = sync_epics_to_github(epics=epics)
+    result = sync_epics_to_github(epics=epics, config=SyncConfigRequest())
     assert result["failed"] == 1
     assert result["skipped"] == 1
     assert result["synced"] == 0
@@ -190,7 +190,7 @@ def test_sync_issue_failure_does_not_abort_other_tasks():
             ],
         }
     ]
-    result = sync_epics_to_github(epics=epics)
+    result = sync_epics_to_github(epics=epics, config=SyncConfigRequest())
     assert result["synced"] == 2   # milestone + 1 issue
     assert result["failed"] == 1
     assert result["status"] == SyncStatus.synced
@@ -200,4 +200,4 @@ def test_sync_raises_without_repo(monkeypatch):
     import app.services.github_sync as svc
     monkeypatch.setattr(svc.settings, "github_repo", "")
     with pytest.raises(RuntimeError, match="GITHUB_REPO"):
-        sync_epics_to_github(epics=[{"title": "E1", "tasks": []}])
+        sync_epics_to_github(epics=[{"title": "E1", "tasks": []}], config=SyncConfigRequest())

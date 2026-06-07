@@ -34,7 +34,7 @@ from app.schemas.project import (
     phase_to_int,
 )
 from app.schemas.proposal import ProposalResponse
-from app.schemas.sync import SyncResponse
+from app.schemas.sync import SyncConfigRequest, SyncConfigResponse, SyncProvider, SyncResponse
 from app.services.ingestion import ingest_document
 from app.services.workflow import get_workflow
 
@@ -595,19 +595,25 @@ def get_epics(
 
 
 @router.post("/projects/{project_id}/sync", response_model=SyncResponse)
-def sync_to_github(
+async def sync(
     project_id: str,
     db: Session = Depends(get_db),
 ) -> SyncResponse:
+    import inspect
     import json as _json_mod
-    from app.services.github_sync import sync_epics_to_github
+    from app.config import settings as _settings
+    from app.models.enums import SyncStatus as DBSyncStatus
+    from app.services.sync_factory import get_sync_fn
 
-    _get_project_or_404(project_id, db)
+    project = _get_project_or_404(project_id, db)
     epics = db.query(Epic).filter(Epic.project_id == int(project_id)).all()
 
-    epics_payload = []
+    epics_payload: list[dict] = []
+    epic_task_map: list[tuple] = []
+
     for epic in epics:
-        tasks_payload = []
+        tasks_payload: list[dict] = []
+        task_orms: list = []
         for t in epic.tasks:
             try:
                 labels = _json_mod.loads(t.labels) if t.labels else ["task"]
@@ -617,30 +623,95 @@ def sync_to_github(
                 assignees = _json_mod.loads(t.assignees) if t.assignees else []
             except (_json_mod.JSONDecodeError, TypeError):
                 assignees = []
-            tasks_payload.append({
+            task_dict: dict = {
                 "title": t.title,
                 "body": t.description or "",
                 "labels": labels,
                 "assignees": assignees,
-            })
-        epics_payload.append({
+            }
+            tasks_payload.append(task_dict)
+            task_orms.append(t)
+        epic_dict: dict = {
             "title": epic.title,
             "description": epic.description or "",
             "due_date": "",
             "tasks": tasks_payload,
-        })
+        }
+        epics_payload.append(epic_dict)
+        epic_task_map.append((epic, task_orms))
 
-    result = sync_epics_to_github(epics=epics_payload)
+    provider, _config, sync_fn = get_sync_fn(project)
 
-    # Update sync_status in DB
-    from app.models.enums import SyncStatus as DBSyncStatus
-    for epic in epics:
-        epic.sync_status = DBSyncStatus.synced
-        for t in epic.tasks:
-            t.sync_status = DBSyncStatus.synced
+    if inspect.iscoroutinefunction(sync_fn):
+        result = await sync_fn(epics_payload)
+    else:
+        result = sync_fn(epics_payload)
+
+    for i, (epic_orm, task_orms) in enumerate(epic_task_map):
+        epic_dict = epics_payload[i]
+        epic_orm.sync_status = DBSyncStatus.synced
+        if provider == SyncProvider.github:
+            epic_orm.github_milestone_number = epic_dict.get("_milestone_number")
+            epic_orm.github_milestone_url = epic_dict.get("_milestone_url")
+            epic_orm.tracker_type = "github_milestone"
+        else:
+            epic_orm.tracker_type = "jira_epic"
+        epic_orm.tracker_ref = epic_dict.get("_tracker_ref")
+        epic_orm.tracker_url = epic_dict.get("_tracker_url")
+
+        for j, task_orm in enumerate(task_orms):
+            task_dict = epic_dict["tasks"][j]
+            task_orm.sync_status = DBSyncStatus.synced
+            if provider == SyncProvider.github:
+                task_orm.github_issue_number = task_dict.get("_issue_number")
+                task_orm.github_issue_url = task_dict.get("_issue_url")
+                task_orm.tracker_type = "github_issue"
+            else:
+                task_orm.tracker_type = "jira_story"
+            task_orm.tracker_ref = task_dict.get("_tracker_ref")
+            task_orm.tracker_url = task_dict.get("_tracker_url")
+
     db.commit()
-
     return SyncResponse(**result)
+
+
+@router.get("/projects/{project_id}/sync-config", response_model=SyncConfigResponse)
+def get_sync_config(
+    project_id: str,
+    db: Session = Depends(get_db),
+) -> SyncConfigResponse:
+    from app.config import settings as _settings
+
+    project = _get_project_or_404(project_id, db)
+    resolved_provider = SyncProvider(project.sync_provider or _settings.sync_provider)
+    return SyncConfigResponse(
+        provider=resolved_provider,
+        config=SyncConfigRequest.model_validate(project.sync_config or {}),
+    )
+
+
+@router.patch("/projects/{project_id}/sync-config", response_model=SyncConfigResponse)
+def update_sync_config(
+    project_id: str,
+    body: SyncConfigRequest,
+    db: Session = Depends(get_db),
+) -> SyncConfigResponse:
+    from app.config import settings as _settings
+
+    project = _get_project_or_404(project_id, db)
+
+    if body.provider is not None:
+        project.sync_provider = body.provider.value
+
+    project.sync_config = body.model_dump(exclude_none=True)
+    db.commit()
+    db.refresh(project)
+
+    resolved_provider = SyncProvider(project.sync_provider or _settings.sync_provider)
+    return SyncConfigResponse(
+        provider=resolved_provider,
+        config=SyncConfigRequest.model_validate(project.sync_config or {}),
+    )
 
 
 @router.post(

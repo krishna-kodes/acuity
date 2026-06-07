@@ -14,6 +14,11 @@ class Settings(BaseSettings):
     github_owner: str = ""
     github_repo: str = ""
     github_use_projects_v2: bool = False
+    sync_provider: str = "github"
+    jira_url: str = ""
+    jira_username: str = ""
+    jira_api_token: str = ""
+    jira_project_key: str = ""
     embedding_dimensions: int = 1536
     chroma_persist_path: str = "./chroma_db"
     pii_encryption_key: str = ""
