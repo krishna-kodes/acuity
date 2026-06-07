@@ -6,6 +6,7 @@ import { PhaseProgressStepper } from "@/components/phase-progress-stepper";
 import { ReviewPageSkeleton, ErrorBanner } from "@/components/page-states";
 import { getPhasesForRoute, getNextPhaseRoute } from "@/lib/project-phases";
 import { cn } from "@/lib/utils";
+import { triggerTeam } from "@/lib/api";
 
 interface TeamMember {
   name: string;
@@ -15,14 +16,6 @@ interface TeamMember {
   matchScore: number;   // 0-1
 }
 
-// TODO (Epic 4): fetch from GET /api/v1/projects/{id}/team
-const MOCK_TEAM: TeamMember[] = [
-  { name: "Alex Rivera",   role: "Tech Lead",          skills: ["Python", "FastAPI", "LangChain", "System Design"], availability: 80, matchScore: 0.96 },
-  { name: "Priya Nair",    role: "ML Engineer",        skills: ["LangGraph", "ChromaDB", "Embeddings", "RAG"],      availability: 100, matchScore: 0.94 },
-  { name: "Jordan Kim",    role: "Frontend Engineer",  skills: ["Next.js", "TypeScript", "Tailwind", "React"],      availability: 100, matchScore: 0.91 },
-  { name: "Sam Okonkwo",   role: "Backend Engineer",   skills: ["FastAPI", "SQLAlchemy", "Alembic", "PostgreSQL"],  availability: 60,  matchScore: 0.88 },
-  { name: "Taylor Brooks", role: "DevOps Engineer",    skills: ["Docker", "GitHub Actions", "AWS", "rclone"],       availability: 40,  matchScore: 0.79 },
-];
 
 function AvailabilityBar({ pct }: { pct: number }) {
   const color = pct >= 80 ? "bg-success" : pct >= 50 ? "bg-warning" : "bg-destructive";
@@ -52,14 +45,33 @@ export default function TeamPage({ params }: { params: Promise<{ id: string }> }
   const [loading, setLoading]       = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [proceeding, setProceeding] = useState(false);
+  const [team, setTeam] = useState<TeamMember[]>([]);
 
-  // TODO (Epic 4): replace with GET /api/v1/projects/{id}/team
-  useEffect(() => { const t = setTimeout(() => setLoading(false), 500); return () => clearTimeout(t); }, []);
+  useEffect(() => {
+    let cancelled = false;
+    triggerTeam(id)
+      .then((data) => {
+        if (cancelled) return;
+        const members: TeamMember[] = data.members.map((m) => ({
+          name: m.name,
+          role: m.seniority,
+          skills: m.skills,
+          availability: m.availability_pct,
+          matchScore: 0.85,
+        }));
+        setTeam(members);
+      })
+      .catch((err: Error) => {
+        if (!cancelled) setFetchError(err.message);
+      })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [id]);
 
   if (loading) return <ReviewPageSkeleton />;
   if (fetchError) return (
     <div className="px-6 py-8 max-w-4xl mx-auto">
-      <ErrorBanner message={fetchError} onRetry={() => { setFetchError(null); setLoading(true); setTimeout(() => setLoading(false), 500); }} />
+      <ErrorBanner message={fetchError} onRetry={() => window.location.reload()} />
     </div>
   );
 
@@ -85,12 +97,12 @@ export default function TeamPage({ params }: { params: Promise<{ id: string }> }
         <div className="bg-card border border-border rounded-xl overflow-hidden">
           <div className="px-4 py-3 border-b border-border bg-surface-subtle/50">
             <span className="text-xs font-semibold text-text-muted uppercase tracking-wide">
-              {MOCK_TEAM.length} members suggested
+              {team.length} members suggested
             </span>
           </div>
 
           <div className="divide-y divide-border">
-            {MOCK_TEAM.map((member) => (
+            {team.map((member) => (
               <div key={member.name} className="flex items-start gap-4 px-4 py-3.5">
                 {/* Avatar */}
                 <div className="w-8 h-8 rounded-full bg-accent-subtle border border-border flex items-center justify-center shrink-0 text-xs font-semibold text-accent-foreground">

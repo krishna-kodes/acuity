@@ -1,11 +1,12 @@
 "use client";
 
-import { useState, use } from "react";
+import { useState, useEffect, use } from "react";
 import { useRouter } from "next/navigation";
 import { PhaseProgressStepper } from "@/components/phase-progress-stepper";
 import { MetricsStatCard } from "@/components/metrics-stat-card";
 import { getPhasesForRoute, getNextPhaseRoute } from "@/lib/project-phases";
 import { cn } from "@/lib/utils";
+import { estimateEffort } from "@/lib/api";
 
 interface EstimateRow {
   area: string;
@@ -42,6 +43,17 @@ export default function EstimationPage({ params }: { params: Promise<{ id: strin
   const { id } = use(params);
   const router = useRouter();
   const [proceeding, setProceeding] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [effort, setEffort] = useState<{ total_points: number; total_weeks: number } | null>(null);
+
+  useEffect(() => {
+    estimateEffort(id)
+      .then(({ data }) => {
+        if (data) setEffort({ total_points: (data as { total_points: number; total_weeks: number }).total_points, total_weeks: (data as { total_points: number; total_weeks: number }).total_weeks });
+      })
+      .catch(() => { /* use mock totals as fallback */ })
+      .finally(() => setLoading(false));
+  }, [id]);
 
   async function handleProceed() {
     setProceeding(true);
@@ -65,9 +77,9 @@ export default function EstimationPage({ params }: { params: Promise<{ id: strin
 
         {/* Summary stats */}
         <div className="grid grid-cols-3 gap-3">
-          <MetricsStatCard label="Optimistic"   value={`${totalLow}d`}  />
-          <MetricsStatCard label="Most Likely"  value={`${totalMid}d`}  />
-          <MetricsStatCard label="Pessimistic"  value={`${totalHigh}d`} />
+          <MetricsStatCard label="Story Points" value={effort ? String(effort.total_points) : `${totalMid}pts`} />
+          <MetricsStatCard label="Weeks"         value={effort ? `${effort.total_weeks}w` : `${Math.round(totalMid / 5)}w`} />
+          <MetricsStatCard label="Confidence"   value={loading ? "…" : "0.75"} />
         </div>
 
         {/* Estimate table */}

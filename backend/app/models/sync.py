@@ -19,6 +19,9 @@ class Epic(Base):
     estimated_points: Mapped[int | None] = mapped_column(Integer)
     github_milestone_number: Mapped[int | None] = mapped_column(Integer)
     github_milestone_url: Mapped[str | None] = mapped_column(String(500))
+    tracker_ref: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    tracker_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    tracker_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
     sync_status: Mapped[SyncStatus] = mapped_column(
         SAEnum(SyncStatus), default=SyncStatus.pending, nullable=False
     )
@@ -38,6 +41,9 @@ class Task(Base):
     estimated_points: Mapped[int | None] = mapped_column(Integer)
     github_issue_number: Mapped[int | None] = mapped_column(Integer)
     github_issue_url: Mapped[str | None] = mapped_column(String(500))
+    tracker_ref: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    tracker_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    tracker_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
     sync_status: Mapped[SyncStatus] = mapped_column(
         SAEnum(SyncStatus), default=SyncStatus.pending, nullable=False
     )

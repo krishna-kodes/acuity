@@ -28,19 +28,6 @@ const TBD_LEVEL_LABELS: Record<number, TBDItem["level"]> = {
   4: "Contradiction",
 };
 
-// Simulated AI responses keyed by message content patterns
-function simulatedReply(userText: string): string {
-  const lower = userText.toLowerCase();
-  if (lower.includes("sla") || lower.includes("processing time"))
-    return "Got it. Based on the document context, a 2–5 minute SLA for PDFs up to 50 pages seems reasonable. I'll capture that as the processing target. Anything else to clarify?";
-  if (lower.includes("team") || lower.includes("engineer"))
-    return "Noted — I'll plan the team suggestion around that headcount. This also affects the effort estimates I'll generate in Phase 5.";
-  if (lower.includes("cloud") || lower.includes("aws") || lower.includes("gcp") || lower.includes("azure"))
-    return "Cloud provider noted. I'll factor that into the tech stack suggestion in Phase 3, including managed services and deployment options specific to that platform.";
-  if (lower.includes("auth") || lower.includes("login") || lower.includes("sso"))
-    return "Authentication strategy noted. I'll include this in the tech stack recommendation and make sure the epic breakdown covers the auth implementation tasks.";
-  return "Thanks — I've noted that. Is there anything else in the document you'd like to clarify before we generate the proposal?";
-}
 
 export default function ChatPage({ params }: { params: Promise<{ id: string }> }) {
   const { id: projectId } = use(params);
@@ -103,16 +90,69 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
     setMessages((prev) => [...prev, userMsg]);
     setIsLoading(true);
 
-    // Chat endpoint not yet implemented — simulated for now
-    await new Promise((res) => setTimeout(res, 1200));
-    const aiMsg: ChatMessage = {
-      id: String(Date.now() + 1),
-      role: "ai",
-      text: simulatedReply(text),
-      timestamp: new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }),
-    };
-    setMessages((prev) => [...prev, aiMsg]);
+  // Add empty AI message placeholder
+  const aiId = String(Date.now() + 1);
+  const ts = new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
+  setMessages((prev) => [...prev, { id: aiId, role: "ai" as const, text: "", timestamp: ts }]);
+
+  try {
+    const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+    const response = await fetch(
+      `${apiBase}/api/v1/projects/${projectId}/chat`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: text, proceed: false }),
+      }
+    );
+
+    if (!response.ok || !response.body) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let accumulated = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+
+      for (const line of lines) {
+        if (!line.startsWith("data: ")) continue;
+        try {
+          const event = JSON.parse(line.slice(6)) as { type: string; content?: string; items?: unknown[]; message?: string };
+          if (event.type === "token" && event.content) {
+            accumulated += event.content;
+            setMessages((prev) =>
+              prev.map((m) => m.id === aiId ? { ...m, text: accumulated } : m)
+            );
+          } else if (event.type === "done") {
+            break;
+          } else if (event.type === "error") {
+            throw new Error(event.content ?? event.message ?? "Stream error");
+          }
+        } catch {
+          // skip malformed SSE lines
+        }
+      }
+    }
+  } catch (err) {
+    // On error, update the placeholder message with an error note
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.id === aiId
+          ? { ...m, text: "Sorry, I couldn't get a response. Please try again." }
+          : m
+      )
+    );
+  } finally {
     setIsLoading(false);
+  }
   }
 
   function handleTBDAction(id: string, action: TBDAction) {
