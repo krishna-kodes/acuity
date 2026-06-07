@@ -8,59 +8,46 @@ import { getPhasesForRoute, getNextPhaseRoute } from "@/lib/project-phases";
 import { cn } from "@/lib/utils";
 import { estimateEffort } from "@/lib/api";
 
-interface EstimateRow {
-  area: string;
-  low: number;
-  mid: number;
-  high: number;
-  confidence: "high" | "medium" | "low";
-  notes: string;
+interface EpicEstimate {
+  title: string;
+  estimated_points: number;
+  confidence?: number;
 }
 
-// TODO (Epic 4): fetch from GET /api/v1/projects/{id}/estimate
-const MOCK_ESTIMATES: EstimateRow[] = [
-  { area: "Document Ingestion & RAG",    low: 5,  mid: 8,  high: 12, confidence: "high",   notes: "Standard chunking pipeline; ChromaDB integration already specified." },
-  { area: "Chat & Refinement (Phase 2)", low: 6,  mid: 10, high: 14, confidence: "medium", notes: "TBD detection complexity depends on LLM reliability; build in buffer." },
-  { area: "Tech Stack Suggestion",       low: 3,  mid: 5,  high: 7,  confidence: "high",   notes: "Tool-calling pattern is well-defined; approved_technologies table is the bottleneck." },
-  { area: "Team Suggestion Engine",      low: 4,  mid: 6,  high: 9,  confidence: "medium", notes: "Skills matcher logic may require iteration; availability data quality unknown." },
-  { area: "Effort Estimation (LLM)",     low: 3,  mid: 5,  high: 8,  confidence: "medium", notes: "Historical project retrieval quality drives accuracy; needs real seed data." },
-  { area: "Epic & Task Generation",      low: 4,  mid: 7,  high: 10, confidence: "high",   notes: "Pydantic structured output is reliable; GitHub MCP integration adds 1–2 days." },
-  { area: "Eval Layer",                  low: 5,  mid: 8,  high: 12, confidence: "low",    notes: "Highly variable — depends on baseline pass rates and grader implementation time." },
-  { area: "DevOps & CI",                 low: 2,  mid: 3,  high: 5,  confidence: "high",   notes: "Ruff, mypy, pytest already scaffolded. GitHub Actions CI already configured." },
-];
-
-const CONFIDENCE_STYLES: Record<EstimateRow["confidence"], string> = {
-  high:   "text-success bg-success-subtle",
-  medium: "text-warning bg-warning-subtle",
-  low:    "text-destructive bg-destructive-subtle",
-};
-
-const totalMid  = MOCK_ESTIMATES.reduce((s, r) => s + r.mid, 0);
-const totalLow  = MOCK_ESTIMATES.reduce((s, r) => s + r.low, 0);
-const totalHigh = MOCK_ESTIMATES.reduce((s, r) => s + r.high, 0);
+interface EffortData {
+  epics: EpicEstimate[];
+  total_points: number;
+  total_weeks: number;
+  confidence?: number;
+}
 
 export default function EstimationPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const router = useRouter();
   const [proceeding, setProceeding] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [effort, setEffort] = useState<{ total_points: number; total_weeks: number } | null>(null);
+  const [effort, setEffort] = useState<EffortData | null>(null);
 
   useEffect(() => {
     estimateEffort(id)
       .then(({ data }) => {
-        if (data) setEffort({ total_points: (data as { total_points: number; total_weeks: number }).total_points, total_weeks: (data as { total_points: number; total_weeks: number }).total_weeks });
+        if (data) setEffort(data as unknown as EffortData);
       })
-      .catch(() => { /* use mock totals as fallback */ })
+      .catch(() => {})
       .finally(() => setLoading(false));
   }, [id]);
 
   async function handleProceed() {
     setProceeding(true);
-    // TODO (Epic 4): POST /api/v1/projects/{id}/phases/6/start
     await new Promise((res) => setTimeout(res, 800));
     router.push(getNextPhaseRoute("estimation", id));
   }
+
+  const epics = effort?.epics ?? [];
+  const overallConfidence = effort?.confidence ?? epics[0]?.confidence;
+  const confidenceLabel = overallConfidence != null
+    ? `${(overallConfidence * 100).toFixed(0)}%`
+    : "—";
 
   return (
     <div className="px-6 py-8 max-w-4xl mx-auto flex flex-col gap-6">
@@ -71,55 +58,69 @@ export default function EstimationPage({ params }: { params: Promise<{ id: strin
           <h2 className="text-base font-semibold text-foreground">Effort Estimation</h2>
           <p className="text-xs text-text-muted mt-0.5">
             AI-generated estimates based on requirements complexity and historical project data.
-            Ranges show optimistic / most-likely / pessimistic days.
           </p>
         </div>
 
         {/* Summary stats */}
         <div className="grid grid-cols-3 gap-3">
-          <MetricsStatCard label="Story Points" value={effort ? String(effort.total_points) : `${totalMid}pts`} />
-          <MetricsStatCard label="Weeks"         value={effort ? `${effort.total_weeks}w` : `${Math.round(totalMid / 5)}w`} />
-          <MetricsStatCard label="Confidence"   value={loading ? "…" : "0.75"} />
+          <MetricsStatCard label="Story Points" value={loading ? "…" : effort ? String(effort.total_points) : "—"} />
+          <MetricsStatCard label="Weeks"         value={loading ? "…" : effort ? `${effort.total_weeks}w` : "—"} />
+          <MetricsStatCard label="Confidence"    value={loading ? "…" : confidenceLabel} />
         </div>
 
         {/* Estimate table */}
         <div className="bg-card border border-border rounded-xl overflow-hidden">
           <div className="overflow-x-auto">
-            <div className="min-w-[520px]">
+            <div className="min-w-[420px]">
               <div className="px-4 py-3 border-b border-border bg-surface-subtle/50 grid grid-cols-12 gap-2 text-[10px] font-semibold uppercase tracking-wide text-text-muted">
-                <span className="col-span-4">Area</span>
-                <span className="col-span-3 text-center">Low / Mid / High (days)</span>
-                <span className="col-span-2 text-center">Confidence</span>
-                <span className="col-span-3 hidden sm:block">Notes</span>
+                <span className="col-span-7">Epic</span>
+                <span className="col-span-2 text-center">Points</span>
+                <span className="col-span-3 text-center">Confidence</span>
               </div>
 
               <div className="divide-y divide-border">
-                {MOCK_ESTIMATES.map((row) => (
-                  <div key={row.area} className="grid grid-cols-12 gap-2 px-4 py-3 items-start">
-                    <span className="col-span-4 text-sm font-medium text-foreground leading-snug">{row.area}</span>
-                    <span className="col-span-3 text-center text-xs text-text-secondary tabular-nums font-mono">
-                      {row.low} / <strong className="text-foreground">{row.mid}</strong> / {row.high}
-                    </span>
-                    <span className="col-span-2 flex justify-center">
-                      <span className={cn("text-[10px] font-medium px-2 py-0.5 rounded-full capitalize", CONFIDENCE_STYLES[row.confidence])}>
-                        {row.confidence}
-                      </span>
-                    </span>
-                    <span className="col-span-3 text-[11px] text-text-secondary leading-relaxed hidden sm:block">{row.notes}</span>
-                  </div>
-                ))}
+                {loading ? (
+                  <div className="px-4 py-6 text-sm text-text-muted text-center">Estimating…</div>
+                ) : epics.length === 0 ? (
+                  <div className="px-4 py-6 text-sm text-text-muted text-center">No breakdown available yet.</div>
+                ) : (
+                  epics.map((epic, i) => {
+                    const conf = epic.confidence;
+                    const confLabel = conf != null ? `${(conf * 100).toFixed(0)}%` : "—";
+                    const confColor =
+                      conf == null ? "text-text-muted bg-muted"
+                      : conf >= 0.75 ? "text-success bg-success-subtle"
+                      : conf >= 0.5 ? "text-warning bg-warning-subtle"
+                      : "text-destructive bg-destructive-subtle";
+                    return (
+                      <div key={i} className="grid grid-cols-12 gap-2 px-4 py-3 items-center">
+                        <span className="col-span-7 text-sm font-medium text-foreground leading-snug">{epic.title}</span>
+                        <span className="col-span-2 text-center text-xs tabular-nums font-mono text-foreground font-semibold">
+                          {epic.estimated_points}
+                        </span>
+                        <span className="col-span-3 flex justify-center">
+                          <span className={cn("text-[10px] font-medium px-2 py-0.5 rounded-full", confColor)}>
+                            {confLabel}
+                          </span>
+                        </span>
+                      </div>
+                    );
+                  })
+                )}
               </div>
 
               {/* Totals row */}
-              <div className="grid grid-cols-12 gap-2 px-4 py-3 border-t border-border bg-surface-subtle/50 items-center">
-                <span className="col-span-4 text-xs font-semibold text-foreground">Total</span>
-                <span className="col-span-3 text-center text-xs font-semibold tabular-nums font-mono text-foreground">
-                  {totalLow} / {totalMid} / {totalHigh}
-                </span>
-                <span className="col-span-5 text-[11px] text-text-muted hidden sm:block">
-                  ≈ {Math.round(totalMid / 5)} weeks at full team capacity
-                </span>
-              </div>
+              {!loading && effort && (
+                <div className="grid grid-cols-12 gap-2 px-4 py-3 border-t border-border bg-surface-subtle/50 items-center">
+                  <span className="col-span-7 text-xs font-semibold text-foreground">Total</span>
+                  <span className="col-span-2 text-center text-xs font-semibold tabular-nums font-mono text-foreground">
+                    {effort.total_points}
+                  </span>
+                  <span className="col-span-3 text-[11px] text-text-muted text-center">
+                    ≈ {effort.total_weeks}w
+                  </span>
+                </div>
+              )}
             </div>
           </div>
         </div>
