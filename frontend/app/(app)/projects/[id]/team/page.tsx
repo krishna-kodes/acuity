@@ -77,7 +77,7 @@ export default function TeamPage({ params }: { params: Promise<{ id: string }> }
           seniority: m.seniority,
           availability_pct: m.availability_pct,
           skills: m.skills,
-          matchScore: 0.85,
+          matchScore: (m as { match_score?: number }).match_score ?? 0,
           manual: false,
         }));
         setTeam(members);
