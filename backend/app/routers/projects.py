@@ -51,6 +51,10 @@ _POST_CHAT_PHASES = {
 }
 # Phases that mean phase 4 (team) is complete
 _POST_TEAM_PHASES = {
+    ProjectPhase.team, ProjectPhase.estimation, ProjectPhase.epics, ProjectPhase.complete,
+}
+# Phases that mean phase 5 (estimation) is complete
+_POST_ESTIMATION_PHASES = {
     ProjectPhase.estimation, ProjectPhase.epics, ProjectPhase.complete,
 }
 
@@ -790,8 +794,8 @@ async def estimate_effort(
         from app.services.workflow import run_phase
         state = await run_phase(str(project.id))
         effort = state.get("effort_estimates") or {}
-    except Exception:
-        pass
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Effort estimation failed: {exc}") from exc
 
     project.effort_estimates = effort
     db.commit()
@@ -814,13 +818,19 @@ async def generate_epics(
 ) -> dict:
     project = _get_project_or_404(project_id, db)
 
+    if project.phase not in _POST_ESTIMATION_PHASES:
+        raise HTTPException(
+            status_code=409,
+            detail="Phase 5 (effort estimation) must be complete before generating epics",
+        )
+
     epics_data: list = []
     try:
         from app.services.workflow import run_phase
         state = await run_phase(str(project.id))
         epics_data = state.get("epics") or []
-    except Exception:
-        pass
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Epic generation failed: {exc}") from exc
 
     import json as _json_mod
     for epic_dict in epics_data:
