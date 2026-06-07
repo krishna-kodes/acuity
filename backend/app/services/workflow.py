@@ -259,7 +259,7 @@ async def _phase_2_init_node(state: ProjectState) -> dict[str, Any]:
     return {
         "phase_status": ps,
         "chat_messages": existing_messages if existing_messages else [],
-        "chat_proceed": False,
+        "chat_proceed": state.get("chat_proceed", False),
     }
 
 
