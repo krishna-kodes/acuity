@@ -281,9 +281,12 @@ async def _chat_turn_node(state: ProjectState) -> dict[str, Any]:
     )
 
     known = {t.get("text", "") for t in (state.get("tbd_items") or [])}
-    new_tbds = await detect_tbds(last_user, chunks, known_tbds=known)
-    if new_tbds:
-        persist_tbds(int(project_id), new_tbds)
+    try:
+        new_tbds = await detect_tbds(last_user, chunks, known_tbds=known)
+        if new_tbds:
+            persist_tbds(int(project_id), new_tbds)
+    except Exception:
+        new_tbds = []
 
     lc_messages = [
         SystemMessage(content=f"Answer using only this context:\n\n{context}"),
