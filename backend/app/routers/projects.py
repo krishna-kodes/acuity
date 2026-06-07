@@ -38,6 +38,7 @@ from app.schemas.project import (
     TeamUpdateRequest,
     phase_to_int,
 )
+from app.schemas.modules import ModulePatchRequest, ModulesResponse, ModuleOut
 from app.schemas.proposal import ProposalResponse, ProposalRetryRequest, ProposalSectionOut
 from app.schemas.sync import SyncConfigRequest, SyncConfigResponse, SyncProvider, SyncResponse
 from app.services.ingestion import ingest_document
@@ -47,6 +48,11 @@ router = APIRouter(tags=["projects"])
 
 # Phases that mean phase 2 (chat) is complete
 _POST_CHAT_PHASES = {
+    ProjectPhase.modules, ProjectPhase.techstack, ProjectPhase.team, ProjectPhase.estimation,
+    ProjectPhase.epics, ProjectPhase.complete,
+}
+# Phases that mean phase 3 (modules) is complete
+_POST_MODULES_PHASES = {
     ProjectPhase.techstack, ProjectPhase.team, ProjectPhase.estimation,
     ProjectPhase.epics, ProjectPhase.complete,
 }
@@ -681,9 +687,120 @@ def approve_proposal(
     )
     if not proposal:
         raise HTTPException(status_code=404, detail="No proposal to approve")
-    project.phase = ProjectPhase.techstack
+    project.phase = ProjectPhase.modules
     db.commit()
     return _proposal_to_response(proposal, project_id)
+
+
+# ── Modules endpoints ──────────────────────────────────────────────────────────
+
+def _parse_modules(project: "Project") -> list[dict]:
+    """Return parsed modules list from project.modules_json, or []."""
+    if not project.modules_json:
+        return []
+    try:
+        return json.loads(project.modules_json)
+    except Exception:
+        return []
+
+
+@router.post("/projects/{project_id}/modules", response_model=ModulesResponse, status_code=201)
+async def extract_modules(
+    project_id: str,
+    db: Session = Depends(get_db),
+) -> ModulesResponse:
+    """Extract high-level work modules from the approved proposal using LLM."""
+    import uuid
+    project = _get_project_or_404(project_id, db)
+
+    proposal = (
+        db.query(Proposal)
+        .filter(Proposal.project_id == project.id)
+        .order_by(Proposal.created_at.desc())
+        .first()
+    )
+
+    sections_text = ""
+    if proposal and proposal.content_json:
+        try:
+            raw = json.loads(proposal.content_json)
+            sections = raw.get("sections", [])
+            sections_text = "\n\n".join(
+                f"## {s['heading']}\n{s['body']}" for s in sections
+            )
+        except Exception:
+            pass
+
+    modules: list[dict] = []
+    if sections_text:
+        prompt = (
+            "You are a project analyst. Given this proposal, extract ALL discrete work modules.\n"
+            "For each module output: title (concise noun phrase), label (one of: frontend, backend, "
+            "devops, QA, PM, design, data, infra), description (one sentence).\n\n"
+            f"Proposal sections:\n{sections_text}\n\n"
+            'Respond ONLY with valid JSON:\n'
+            '{"modules": [{"id": "<uuid4>", "title": "...", "label": "...", "description": "..."}, ...]}'
+        )
+        try:
+            from app.services.llm_factory import get_llm
+            result = await get_llm().ainvoke(prompt)
+            content = result.content if hasattr(result, "content") else str(result)
+            # Strip markdown code fences if present
+            content = re.sub(r"```(?:json)?\s*", "", content).strip().rstrip("```").strip()
+            parsed = json.loads(content)
+            for m in parsed.get("modules", []):
+                modules.append({
+                    "id": m.get("id") or str(uuid.uuid4()),
+                    "title": str(m.get("title", "")),
+                    "label": str(m.get("label", "backend")),
+                    "description": str(m.get("description", "")),
+                })
+        except Exception:
+            pass  # Safe fallback: return empty list
+
+    project.modules_json = json.dumps(modules)
+    db.commit()
+    return ModulesResponse(modules=[ModuleOut(**m) for m in modules])
+
+
+@router.get("/projects/{project_id}/modules", response_model=ModulesResponse)
+def get_modules(
+    project_id: str,
+    db: Session = Depends(get_db),
+) -> ModulesResponse:
+    project = _get_project_or_404(project_id, db)
+    modules = _parse_modules(project)
+    return ModulesResponse(modules=[ModuleOut(**m) for m in modules])
+
+
+@router.patch("/projects/{project_id}/modules", response_model=ModulesResponse)
+def update_modules(
+    project_id: str,
+    body: ModulePatchRequest,
+    db: Session = Depends(get_db),
+) -> ModulesResponse:
+    project = _get_project_or_404(project_id, db)
+    project.modules_json = json.dumps([m.model_dump() for m in body.modules])
+    db.commit()
+    return ModulesResponse(modules=body.modules)
+
+
+@router.post("/projects/{project_id}/modules/approve", response_model=ModulesResponse)
+def approve_modules(
+    project_id: str,
+    db: Session = Depends(get_db),
+) -> ModulesResponse:
+    project = _get_project_or_404(project_id, db)
+    if project.phase not in (ProjectPhase.modules, *_POST_MODULES_PHASES):
+        raise HTTPException(
+            status_code=409,
+            detail="Project must be in modules phase to approve",
+        )
+    if project.phase == ProjectPhase.modules:
+        project.phase = ProjectPhase.techstack
+        db.commit()
+    modules = _parse_modules(project)
+    return ModulesResponse(modules=[ModuleOut(**m) for m in modules])
 
 
 @router.get("/projects/{project_id}/export/proposal")
@@ -848,10 +965,10 @@ async def suggest_stack(
 ) -> TechStackResponse:
     project = _get_project_or_404(project_id, db)
 
-    if project.phase not in _POST_CHAT_PHASES:
+    if project.phase not in _POST_MODULES_PHASES:
         raise HTTPException(
             status_code=409,
-            detail="Phase 2 (chat & refinement) must be complete before running tech stack suggestion",
+            detail="Phase 3 (modules) must be complete before running tech stack suggestion",
         )
 
     tech_stack: dict = {}
