@@ -40,6 +40,7 @@ source .venv/bin/activate   # or .venv\Scripts\activate on Windows
 
 # Install dependencies
 pip install -r requirements-dev.txt
+python -m spacy download en_core_web_sm
 
 # Run dev server
 uvicorn app.main:app --reload --port 8000
