@@ -426,6 +426,108 @@ def apply_redaction_decisions(
     return RedactionSummaryResponse(applied=applied, skipped=skipped, status=status)
 
 
+@router.post("/projects/{project_id}/pii-llm-filter")
+async def pii_llm_filter(
+    project_id: str,
+    db: Session = Depends(get_db),
+) -> dict:
+    """LLM quality-gate: prune false-positive NER detections.
+
+    Fetches undecided NER (PERSON/ORG/GPE) detections, asks the LLM which
+    are real human names or real company names, auto-overrides the rest.
+    Returns {"candidates_sent": int, "kept": int, "pruned": int}.
+    Safe fallback: if LLM call fails, all candidates are kept unchanged.
+    """
+    import re as _re
+    from app.models.pii import PIIDetection
+    from app.services.llm_factory import get_llm
+    from app.services.pii_detection import decrypt_original
+
+    _get_project_or_404(project_id, db)
+    latest_doc = (
+        db.query(Document)
+        .filter(Document.project_id == int(project_id))
+        .order_by(Document.upload_ts.desc())
+        .first()
+    )
+    if not latest_doc:
+        return {"candidates_sent": 0, "kept": 0, "pruned": 0}
+
+    ner_dets = (
+        db.query(PIIDetection)
+        .filter(
+            PIIDetection.document_id == latest_doc.id,
+            PIIDetection.detection_method == "ner",
+            PIIDetection.confirmed == False,   # noqa: E712
+            PIIDetection.overridden == False,  # noqa: E712
+        )
+        .all()
+    )
+    if not ner_dets:
+        return {"candidates_sent": 0, "kept": 0, "pruned": 0}
+
+    candidates = [{"id": d.id, "text": decrypt_original(d.text_original)} for d in ner_dets]
+    candidate_texts = [c["text"] for c in candidates]
+
+    keep_texts: list[str] = list(candidate_texts)  # default: keep all (safe fallback)
+    try:
+        llm = get_llm()
+        prompt = (
+            "You are a PII detection validator. These text spans were flagged by an NER model "
+            "as possibly containing person names or organization names. Many are false positives "
+            "(product names, generic terms, project labels, technology names, phase names).\n\n"
+            f"Candidates: {json.dumps(candidate_texts)}\n\n"
+            "Return ONLY candidates that are a REAL human full name (actual person's first+last name) "
+            "or a REAL company/organization name (registered business, institution, team name). "
+            'Respond with exactly: {"keep": ["...", "..."]} — no explanation, no markdown.'
+        )
+        resp = await llm.ainvoke([{"role": "user", "content": prompt}])
+        raw = resp.content if hasattr(resp, "content") else str(resp)
+        m = _re.search(r'\{[^}]*"keep"[^}]*\}', raw, _re.DOTALL)
+        if m:
+            parsed = json.loads(m.group())
+            keep_texts = [t.strip() for t in parsed.get("keep", []) if isinstance(t, str)]
+    except Exception:
+        pass  # safe fallback: keep_texts already set to all candidates
+
+    pruned = 0
+    for det in ner_dets:
+        text = decrypt_original(det.text_original)
+        if text not in keep_texts:
+            det.overridden = True
+            pruned += 1
+    db.commit()
+
+    return {
+        "candidates_sent": len(ner_dets),
+        "kept": len(ner_dets) - pruned,
+        "pruned": pruned,
+    }
+
+
+@router.get("/projects/{project_id}/document-status")
+def get_document_status(
+    project_id: str,
+    db: Session = Depends(get_db),
+) -> dict:
+    """Return latest document status and project phase.
+
+    Frontend polls this after PATCH /redaction-decisions to know when
+    complete_ingestion() has finished (status == 'ready') before navigating.
+    """
+    project = _get_project_or_404(project_id, db)
+    doc = (
+        db.query(Document)
+        .filter(Document.project_id == project.id)
+        .order_by(Document.upload_ts.desc())
+        .first()
+    )
+    return {
+        "status": doc.status.value if doc else "none",
+        "project_phase": project.phase.value,
+    }
+
+
 @router.get("/projects/{project_id}/tbds", response_model=list[TBDItem])
 def get_tbds(
     project_id: str,
