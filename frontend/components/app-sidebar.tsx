@@ -1,8 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
+import { listProjects } from "@/lib/api";
 
 export interface NavItem {
   key: string;
@@ -110,14 +113,24 @@ function IconDocument() {
   );
 }
 
+// current_phase is a number from the API; map to route segment
+const PHASE_NUMBER_TO_ROUTE: Record<number, string> = {
+  1: "redaction",
+  2: "chat",
+  3: "techstack",
+  4: "team",
+  5: "estimation",
+  6: "epics",
+};
+
 const GLOBAL_NAV = [
   { key: "dashboard", label: "All Projects", href: "/", icon: <IconDashboard />, phase: null },
-  { key: "upload", label: "New Project", href: "/projects/new", icon: <IconUpload />, phase: null },
 ];
 
 function buildProjectNav(projectId: string) {
   const base = `/projects/${projectId}`;
   return [
+    { key: "upload", label: "Upload", href: "/projects/new", icon: <IconUpload />, phase: null },
     { key: "redaction", label: "Redaction Review", href: `${base}/redaction`, icon: <IconShield />, phase: "redaction" },
     { key: "chat", label: "Chat & Refine", href: `${base}/chat`, icon: <IconChat />, phase: "chat" },
     { key: "tech-stack", label: "Tech Stack", href: `${base}/techstack`, icon: <IconLayers />, phase: "tech-stack" },
@@ -152,6 +165,123 @@ function NavLink({ item, activePhase }: { item: NavItem; activePhase?: string | 
   );
 }
 
+function ProjectSwitcher({ currentProjectId }: { currentProjectId: string }) {
+  const [open, setOpen] = useState(false)
+  const router = useRouter()
+
+  const { data: projects } = useQuery({
+    queryKey: ["projects"],
+    queryFn: async () => {
+      const { data, error } = await listProjects()
+      if (error) throw new Error(String(error))
+      return data ?? []
+    },
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
+  })
+
+  const current = projects?.find((p) => p.id === currentProjectId)
+  const displayName = current?.name ?? `Project ${currentProjectId}`
+
+  function navigate(project: { id: string; current_phase: number }) {
+    const route = PHASE_NUMBER_TO_ROUTE[project.current_phase] ?? "redaction"
+    router.push(`/projects/${project.id}/${route}`)
+    setOpen(false)
+  }
+
+  return (
+    <div className="relative px-2 mb-1">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center justify-between gap-2 px-3 py-2 rounded-md text-sm hover:bg-sidebar-hover transition-colors"
+      >
+        <span className="truncate font-medium text-foreground text-sm">{displayName}</span>
+        <span className="text-[10px] text-text-muted whitespace-nowrap shrink-0">Switch project</span>
+        <svg
+          className={cn("w-3 h-3 text-text-muted shrink-0 transition-transform", open && "rotate-180")}
+          fill="none" viewBox="0 0 12 12" stroke="currentColor" strokeWidth={2}
+        >
+          <path d="M2 4l4 4 4-4" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
+      {open && projects && projects.length > 0 && (
+        <div className="absolute left-2 right-2 top-full mt-1 z-50 bg-card border border-border rounded-lg shadow-md overflow-hidden max-h-56 overflow-y-auto">
+          {projects.map((p) => (
+            <button
+              key={p.id}
+              onClick={() => navigate(p)}
+              className={cn(
+                "w-full text-left px-3 py-2 text-sm transition-colors hover:bg-surface-subtle",
+                p.id === currentProjectId
+                  ? "bg-accent text-accent-foreground font-medium"
+                  : "text-foreground"
+              )}
+            >
+              {p.name}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ProfileMenu() {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="relative border-t border-sidebar-border p-2 shrink-0">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center gap-2.5 px-3 py-2 rounded-md hover:bg-sidebar-hover transition-colors"
+      >
+        <div className="w-7 h-7 rounded-full bg-accent flex items-center justify-center text-[11px] font-bold text-accent-foreground shrink-0">
+          PM
+        </div>
+        <div className="flex-1 min-w-0 text-left">
+          <div className="text-xs font-medium text-foreground truncate">You</div>
+          <div className="text-[10px] text-text-muted truncate">Product Manager</div>
+        </div>
+        <svg
+          className={cn("w-3 h-3 text-text-muted shrink-0 transition-transform", open && "rotate-180")}
+          fill="none" viewBox="0 0 12 12" stroke="currentColor" strokeWidth={2}
+        >
+          <path d="M2 4l4 4 4-4" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
+      {open && (
+        <div className="absolute bottom-full left-2 right-2 mb-1 z-50 bg-card border border-border rounded-lg shadow-md overflow-hidden">
+          <button
+            className="w-full text-left px-3 py-2 text-sm text-foreground hover:bg-surface-subtle transition-colors"
+            onClick={() => setOpen(false)}
+          >
+            Your profile
+          </button>
+          <button
+            className="w-full text-left px-3 py-2 text-sm text-foreground hover:bg-surface-subtle transition-colors"
+            onClick={() => setOpen(false)}
+          >
+            Settings
+          </button>
+          <Link
+            href="/admin/employees"
+            onClick={() => setOpen(false)}
+            className="block px-3 py-2 text-sm text-foreground hover:bg-surface-subtle transition-colors"
+          >
+            Administration
+          </Link>
+          <div className="border-t border-border" />
+          <button
+            className="w-full text-left px-3 py-2 text-sm text-destructive hover:bg-surface-subtle transition-colors"
+            onClick={() => setOpen(false)}
+          >
+            Sign out
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function AppSidebar({ projectId: projectIdProp, activePhase, className }: AppSidebarProps) {
   const pathname = usePathname();
   const projectId = projectIdProp ?? pathname.match(/\/projects\/([^/]+)/)?.[1];
@@ -171,7 +301,8 @@ export function AppSidebar({ projectId: projectIdProp, activePhase, className }:
             <path d="M2 10L7 3l5 7" />
           </svg>
         </div>
-        <span className="text-sm font-semibold text-foreground">Acuity</span>
+        <span className="text-sm font-semibold text-foreground">Cohort PM</span>
+        <span className="text-xs text-text-muted"> / AI Project Studio</span>
       </div>
 
       {/* Nav */}
@@ -180,11 +311,13 @@ export function AppSidebar({ projectId: projectIdProp, activePhase, className }:
           <NavLink key={item.key} item={item} activePhase={activePhase} />
         ))}
 
+        {projectId && <ProjectSwitcher currentProjectId={projectId} />}
+
         {projectNav.length > 0 && (
           <>
             <div className="mt-3 mb-1 px-3">
               <span className="text-[10px] font-semibold uppercase tracking-widest text-text-muted">
-                Current Project
+                PIPELINE
               </span>
             </div>
             {projectNav.map((item) => (
@@ -193,6 +326,8 @@ export function AppSidebar({ projectId: projectIdProp, activePhase, className }:
           </>
         )}
       </nav>
+
+      <ProfileMenu />
     </aside>
   );
 }
