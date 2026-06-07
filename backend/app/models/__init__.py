@@ -10,7 +10,7 @@ from app.models.enums import (
     TBDLevel,
     TBDStatus,
 )
-from app.models.observability import ErrorLog, LatencyLog, Metric
+from app.models.observability import ErrorLog, EvalResult, LatencyLog, Metric, QualityLog, RetrievalLog
 from app.models.pii import PIIDetection, PIIIngestionLog
 from app.models.project import Document, Project, Proposal, ProposalState
 from app.models.reference import ApprovedTechnology, HistoricalProject
@@ -26,5 +26,5 @@ __all__ = [
     "ApprovedTechnology", "HistoricalProject",
     "Epic", "Task",
     "PIIDetection", "PIIIngestionLog",
-    "Metric", "LatencyLog", "ErrorLog",
+    "Metric", "LatencyLog", "ErrorLog", "QualityLog", "RetrievalLog", "EvalResult",
 ]

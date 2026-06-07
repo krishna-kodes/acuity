@@ -915,23 +915,58 @@ def get_metrics(
     db: Session = Depends(get_db),
 ) -> MetricsResponse:
     import statistics
-    from app.models.observability import ErrorLog, LatencyLog, Metric
-    from app.schemas.metrics import ErrorPhaseItem, LatencyNodeItem, TokenPhaseItem
+    from sqlalchemy import func
+
+    from app.models.enums import SyncStatus
+    from app.models.observability import (
+        ErrorLog, EvalResult, LatencyLog, Metric, QualityLog, RetrievalLog
+    )
+    from app.models.sync import Epic, Task
+    from app.schemas.metrics import (
+        DailyTokenItem, ErrorPhaseItem, LatencyNodeItem,
+        QualityScoreItem, RetrievalQueryItem, TokenPhaseItem,
+    )
 
     _get_project_or_404(project_id, db)
     pid = int(project_id)
 
-    # Token aggregation
+    # ── Token aggregation ──────────────────────────────────────────────────────
     metric_rows = db.query(Metric).filter(Metric.project_id == pid).all()
-    total_tokens = sum(r.input_tokens + r.output_tokens for r in metric_rows)
+    total_input = sum(r.input_tokens for r in metric_rows)
+    total_output = sum(r.output_tokens for r in metric_rows)
+    total_tokens = total_input + total_output
     total_cost = sum(r.cost_usd for r in metric_rows)
+
     phase_token_map: dict[str, dict] = {}
     for r in metric_rows:
         e = phase_token_map.setdefault(r.phase, {"tokens": 0, "cost": 0.0})
         e["tokens"] += r.input_tokens + r.output_tokens
         e["cost"] += r.cost_usd
 
-    # Latency aggregation (p50/p95 per node)
+    # ── Daily token trend ──────────────────────────────────────────────────────
+    daily_rows = (
+        db.query(
+            func.date(Metric.created_at).label("day"),
+            func.sum(Metric.input_tokens).label("inp"),
+            func.sum(Metric.output_tokens).label("out"),
+            func.sum(Metric.cost_usd).label("cost"),
+        )
+        .filter(Metric.project_id == pid)
+        .group_by(func.date(Metric.created_at))
+        .order_by(func.date(Metric.created_at))
+        .all()
+    )
+    daily_token_trend = [
+        DailyTokenItem(
+            day=str(r.day),
+            input_tokens=int(r.inp or 0),
+            output_tokens=int(r.out or 0),
+            cost=round(float(r.cost or 0), 6),
+        )
+        for r in daily_rows
+    ]
+
+    # ── Latency aggregation (p50/p95 per node) ─────────────────────────────────
     latency_rows = db.query(LatencyLog).filter(LatencyLog.project_id == pid).all()
     node_durations: dict[str, list[float]] = {}
     for r in latency_rows:
@@ -948,18 +983,79 @@ def get_metrics(
         node: statistics.median(durations) for node, durations in node_durations.items()
     }
 
-    # Error aggregation per phase
+    # ── Error aggregation per phase ────────────────────────────────────────────
     error_rows = db.query(ErrorLog).filter(ErrorLog.project_id == pid).all()
     phase_error_map: dict[str, int] = {}
     for r in error_rows:
         phase_error_map[r.phase or "unknown"] = phase_error_map.get(r.phase or "unknown", 0) + 1
 
+    # ── GitHub sync rate ───────────────────────────────────────────────────────
+    epic_rows = db.query(Epic).filter(Epic.project_id == pid).all()
+    task_rows = (
+        db.query(Task)
+        .join(Epic, Task.epic_id == Epic.id)
+        .filter(Epic.project_id == pid)
+        .all()
+    )
+    all_sync_items = epic_rows + task_rows
+    synced_count = sum(1 for r in all_sync_items if r.sync_status == SyncStatus.synced)
+    failed_count = sum(1 for r in all_sync_items if r.sync_status == SyncStatus.failed)
+    github_sync_success_rate = synced_count / len(all_sync_items) if all_sync_items else 1.0
+
+    # ── Retrieval quality ──────────────────────────────────────────────────────
+    retrieval_rows = (
+        db.query(RetrievalLog)
+        .filter(RetrievalLog.project_id == pid)
+        .order_by(RetrievalLog.query_index)
+        .all()
+    )
+    retrieval_by_query = [
+        RetrievalQueryItem(
+            query_index=r.query_index,
+            n_retrieved=r.n_retrieved,
+            top_score=round(float(r.top_score), 4),
+            avg_score=round(float(r.avg_score), 4),
+        )
+        for r in retrieval_rows
+    ]
+
+    # ── Quality scores (live groundedness + eval run scores) ───────────────────
+    quality_rows = db.query(QualityLog).filter(QualityLog.project_id == pid).all()
+    groundedness_scores = [r.score for r in quality_rows if r.score_type == "groundedness"]
+    avg_groundedness = (
+        round(sum(groundedness_scores) / len(groundedness_scores), 4)
+        if groundedness_scores else None
+    )
+
+    quality_scores: list[QualityScoreItem] = []
+    if avg_groundedness is not None:
+        quality_scores.append(QualityScoreItem(grader="groundedness", score=avg_groundedness, source="live"))
+
+    # Latest eval run
+    eval_pass_rate = 0.0
+    latest_run = (
+        db.query(EvalResult.run_id, func.max(EvalResult.created_at))
+        .group_by(EvalResult.run_id)
+        .order_by(func.max(EvalResult.created_at).desc())
+        .first()
+    )
+    if latest_run:
+        run_id = latest_run[0]
+        run_rows = db.query(EvalResult).filter(EvalResult.run_id == run_id).all()
+        if run_rows:
+            eval_pass_rate = round(sum(1 for r in run_rows if r.passed) / len(run_rows), 4)
+            for r in run_rows:
+                quality_scores.append(QualityScoreItem(grader=r.grader, score=r.score, source="eval_run"))
+
     return MetricsResponse(
         total_tokens=total_tokens,
         total_cost_usd=round(total_cost, 6),
+        input_tokens=total_input,
+        output_tokens=total_output,
         phase_latencies=phase_latencies,
-        eval_pass_rate=0.0,
-        github_sync_success_rate=0.0,
+        eval_pass_rate=eval_pass_rate,
+        github_sync_success_rate=round(github_sync_success_rate, 4),
+        github_sync_fails=failed_count,
         tokens_by_phase=[
             TokenPhaseItem(phase=p, tokens=v["tokens"], cost=round(v["cost"], 6))
             for p, v in phase_token_map.items()
@@ -969,4 +1065,8 @@ def get_metrics(
             ErrorPhaseItem(phase=p, errors=c) for p, c in phase_error_map.items()
         ],
         error_count=len(error_rows),
+        daily_token_trend=daily_token_trend,
+        retrieval_by_query=retrieval_by_query,
+        quality_scores=quality_scores,
+        avg_groundedness=avg_groundedness,
     )

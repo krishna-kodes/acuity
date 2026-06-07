@@ -99,6 +99,66 @@ def record_error(
         db.close()
 
 
+def record_quality(
+    project_id: int,
+    phase: str,
+    score_type: str,
+    score: float,
+    reasoning: str | None = None,
+) -> None:
+    if not settings.metrics_enabled:
+        return
+    from app.database import SessionLocal
+    from app.models.observability import QualityLog
+
+    db = SessionLocal()
+    try:
+        db.add(QualityLog(
+            project_id=project_id,
+            phase=phase,
+            score_type=score_type,
+            score=score,
+            reasoning=reasoning,
+        ))
+        db.commit()
+    except Exception:
+        db.rollback()
+    finally:
+        db.close()
+
+
+def record_retrieval(
+    project_id: int,
+    phase: str,
+    query_index: int,
+    n_retrieved: int,
+    n_reranked: int,
+    top_score: float,
+    avg_score: float,
+) -> None:
+    if not settings.metrics_enabled:
+        return
+    from app.database import SessionLocal
+    from app.models.observability import RetrievalLog
+
+    db = SessionLocal()
+    try:
+        db.add(RetrievalLog(
+            project_id=project_id,
+            phase=phase,
+            query_index=query_index,
+            n_retrieved=n_retrieved,
+            n_reranked=n_reranked,
+            top_score=top_score,
+            avg_score=avg_score,
+        ))
+        db.commit()
+    except Exception:
+        db.rollback()
+    finally:
+        db.close()
+
+
 @contextmanager
 def timed_node(
     project_id: int,
