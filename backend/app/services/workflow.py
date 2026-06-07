@@ -20,7 +20,12 @@ from langgraph.graph import END, StateGraph
 from langgraph.prebuilt import create_react_agent
 from pydantic import BaseModel
 
+import json as _json
+
 # Module-level imports so tests can patch app.services.workflow.<name>
+from app.database import SessionLocal
+from app.models.employee import Employee, EmployeeSkill, Skill
+from app.models.reference import ApprovedTechnology, HistoricalProject
 from app.services.llm_factory import get_llm
 from app.services.rag import retrieve
 from app.services.tbd_detection import detect_tbds
@@ -125,30 +130,112 @@ def with_retry(max_retries: int = 3, base_delay: float = 1.0):
 
 @tool
 def get_employees(skills: list[str]) -> list[dict]:
-    """Return employees matching the requested skills from the employees table."""
-    # TODO(E5-T6): query employees + employee_skills tables
-    return []
+    """Query employees who have any of the requested skills."""
+    db = SessionLocal()
+    try:
+        employees = (
+            db.query(Employee)
+            .join(EmployeeSkill, Employee.id == EmployeeSkill.employee_id)
+            .join(Skill, EmployeeSkill.skill_id == Skill.id)
+            .filter(Skill.name.in_(skills))
+            .distinct()
+            .all()
+        )
+        return [
+            {
+                "id": emp.id,
+                "name": emp.name,
+                "seniority": emp.seniority,
+                "availability_pct": emp.availability_pct,
+                "skills": [es.skill.name for es in emp.employee_skills],
+            }
+            for emp in employees
+        ]
+    finally:
+        db.close()
 
 
 @tool
 def get_historical_projects() -> list[dict]:
-    """Return historical projects for effort calibration."""
-    # TODO(E5-T6): query historical_projects table
-    return []
+    """Retrieve historical projects for effort calibration."""
+    db = SessionLocal()
+    try:
+        projects = db.query(HistoricalProject).limit(10).all()
+        return [
+            {
+                "name": p.name,
+                "domain": p.domain or "",
+                "estimated_points": p.estimated_points or 0,
+                "actual_points": p.actual_points or 0,
+                "duration_weeks": p.duration_weeks or 0,
+                "team_size": p.team_size or 0,
+            }
+            for p in projects
+        ]
+    finally:
+        db.close()
 
 
 @tool
 def estimate_effort(proposal_summary: str, team_size: int, reference_projects: list[dict]) -> dict:
     """Estimate effort in weeks and story points given team and historical data."""
-    # TODO(E5-T6): real LLM-based estimation
-    return {"total_weeks": 8, "total_points": 32, "confidence": 0.7}
+    from app.schemas.project import EpicsOutput
+
+    class _EffortEstimate(BaseModel):
+        total_weeks: int
+        total_points: int
+        confidence: float
+        breakdown: dict[str, int]
+        reasoning: str
+
+    llm = get_llm(fast=True).with_structured_output(_EffortEstimate)
+    refs = "\n".join(
+        f"- {p['name']}: {p['duration_weeks']}w, {p['team_size']} devs, {p['estimated_points']} pts"
+        for p in reference_projects[:5]
+    ) or "No reference projects available."
+
+    result = llm.invoke(
+        f"Estimate effort for this project:\n{proposal_summary}\n\n"
+        f"Team size: {team_size}\n\n"
+        f"Reference projects:\n{refs}\n\n"
+        "Return total_weeks (int), total_points (int), confidence (0.0-1.0), "
+        "breakdown as dict of phase_name->points, and reasoning."
+    )
+    return result.model_dump()
+
+
+_EPIC_GENERATION_PROMPT = (
+    "You are a technical project manager. Generate a realistic set of epics and tasks "
+    "for the following project.\n\n"
+    "Project proposal:\n{proposal_summary}\n\n"
+    "Tech stack: {tech_stack_summary}\n\n"
+    "Today's date: {today}\n\n"
+    "Rules:\n"
+    "- Generate 3–6 epics\n"
+    "- Each epic has 2–4 tasks\n"
+    "- story_points must be one of: 1, 2, 3, 5, 8, 13\n"
+    "- due_date in YYYY-MM-DD format, starting 4 weeks from today\n"
+    "- labels from: frontend, backend, database, infra, testing, docs"
+)
 
 
 @tool
 def generate_epics_tool(proposal_summary: str, tech_stack_summary: str) -> list[dict]:
-    """Generate a list of epics (GitHub milestones) and tasks from the proposal."""
-    # TODO(E5-T6): real structured output generation
-    return []
+    """Generate a list of epics and tasks using structured LLM output."""
+    from datetime import date
+    from app.schemas.project import EpicsOutput
+
+    llm = get_llm(fast=False).with_structured_output(EpicsOutput)
+    today = date.today().isoformat()
+
+    result = llm.invoke(
+        _EPIC_GENERATION_PROMPT.format(
+            proposal_summary=proposal_summary,
+            tech_stack_summary=tech_stack_summary,
+            today=today,
+        )
+    )
+    return [e.model_dump() for e in result.epics]
 
 
 _PHASE_4_TOOLS = [get_employees]
@@ -162,8 +249,8 @@ _PHASE_6_TOOLS = [generate_epics_tool]
 
 async def _phase_2_init_node(state: ProjectState) -> dict[str, Any]:
     """Phase 2: initialise chat loop."""
-    # Only guard if phase_status already exists (not a fresh thread seeded by endpoint)
-    if state.get("phase_status"):
+    # Guard unless phase_status is None (completely absent — LangGraph fresh thread)
+    if state.get("phase_status") is not None:
         _require_phase_complete(state, 2)
     ps = dict(state.get("phase_status") or {})
     ps["phase_2"] = "in_progress"
@@ -237,6 +324,10 @@ async def _phase_2_complete_node(state: ProjectState) -> dict[str, Any]:
     return {"phase_status": ps}
 
 
+# Alias used by tests written against earlier node naming
+_phase_2_chat_node = _phase_2_init_node
+
+
 def _chat_routing(state: ProjectState) -> str:
     """Pure routing function — returns next node name, never mutates state."""
     return "phase_2_complete" if state.get("chat_proceed") else "chat_turn"
@@ -244,32 +335,66 @@ def _chat_routing(state: ProjectState) -> str:
 
 @with_retry()
 async def _phase_3_stack_node(state: ProjectState) -> dict[str, Any]:
-    """Phase 3: Tech stack suggestion.
-
-    Stub: returns placeholder stack. Real LLM call wired in E5-T6.
-    """
+    """Phase 3: Tech stack suggestion — queries approved_technologies DB + LLM."""
     _require_phase_complete(state, 3)
+
     ps = dict(state.get("phase_status") or {})
     ps["phase_3"] = "in_progress"
-    return {
-        "phase_status": ps,
-        "tech_stack": {
-            "frontend": ["Next.js"],
-            "backend": ["FastAPI"],
-            "database": ["SQLite"],
-            "infra": ["Railway"],
-            "rationale": "Stub — populated by LangGraph in E5-T6.",
-        },
+
+    db = SessionLocal()
+    try:
+        techs = db.query(ApprovedTechnology).all()
+        tech_list = [
+            {"name": t.name, "category": t.category, "tags": t.tags or ""}
+            for t in techs
+        ]
+    finally:
+        db.close()
+
+    class _TechStackChoice(BaseModel):
+        frontend: list[str]
+        backend: list[str]
+        database: list[str]
+        infra: list[str]
+        rationale: str
+
+    proposal_summary = state.get("proposal_state", {}).get("summary", "No proposal summary available.")
+    tech_descriptions = "\n".join(
+        f"- {t['name']} ({t['category']}): {t['tags']}" for t in tech_list
+    ) or "No approved technologies in database."
+
+    _FALLBACK_STACK = {
+        "frontend": ["Next.js"],
+        "backend": ["FastAPI"],
+        "database": ["SQLite"],
+        "infra": ["Railway"],
+        "rationale": "Default stack — LLM unavailable.",
     }
+
+    try:
+        llm = get_llm(fast=False).with_structured_output(_TechStackChoice)
+        result = llm.invoke(
+            f"Given this project proposal:\n{proposal_summary}\n\n"
+            f"Select the most appropriate technologies from this approved list:\n{tech_descriptions}\n\n"
+            "Choose 1-3 per category. Return frontend, backend, database, infra lists and a brief rationale."
+        )
+        tech_stack = result.model_dump()
+        ps["phase_3"] = "complete"
+    except Exception:
+        tech_stack = _FALLBACK_STACK
+
+    return {"phase_status": ps, "tech_stack": tech_stack}
 
 
 async def _phase_4_team_node(state: ProjectState) -> dict[str, Any]:
-    """Phase 4: Team suggestion — ReAct agent queries employee skills.
-
-    Builds a fresh agent per invocation so the LLM is resolved at runtime.
-    """
+    """Phase 4: Team suggestion — ReAct agent queries employee skills."""
     _require_phase_complete(state, 4)
-    from app.services.llm_factory import get_llm
+
+    tech_stack = state.get("tech_stack") or {}
+    all_technologies = (
+        tech_stack.get("frontend", []) + tech_stack.get("backend", []) +
+        tech_stack.get("database", []) + tech_stack.get("infra", [])
+    )
 
     agent = create_react_agent(get_llm(), _PHASE_4_TOOLS)
     agent_result = await agent.ainvoke(
@@ -278,28 +403,41 @@ async def _phase_4_team_node(state: ProjectState) -> dict[str, Any]:
                 {
                     "role": "user",
                     "content": (
-                        f"Suggest a team for project {state.get('project_id')}. "
-                        "Use the get_employees tool to find suitable engineers."
+                        f"Find employees for a project using these technologies: {all_technologies}. "
+                        "Use the get_employees tool to query the database. "
+                        "Return the list of suitable team members."
                     ),
                 }
             ]
         }
     )
+
+    # Extract employee data from tool call results
+    members = []
+    for msg in agent_result.get("messages", []):
+        if hasattr(msg, "content") and isinstance(msg.content, str):
+            try:
+                parsed = _json.loads(msg.content)
+                if isinstance(parsed, list) and parsed and "name" in parsed[0]:
+                    members = parsed
+                    break
+            except (_json.JSONDecodeError, (KeyError, IndexError)):
+                pass
+
     ps = dict(state.get("phase_status") or {})
     ps["phase_4"] = "complete"
     return {
         "phase_status": ps,
-        "team_suggestion": {
-            "members": [],
-            "agent_messages": len(agent_result.get("messages", [])),
-        },
+        "team_suggestion": {"members": members, "technologies": all_technologies},
     }
 
 
 async def _phase_5_estimate_node(state: ProjectState) -> dict[str, Any]:
     """Phase 5: Effort estimation — ReAct agent pulls historical data."""
     _require_phase_complete(state, 5)
-    from app.services.llm_factory import get_llm
+
+    proposal_summary = state.get("proposal_state", {}).get("summary", "No proposal available.")
+    team_size = len(state.get("team_suggestion", {}).get("members", [])) or 3
 
     agent = create_react_agent(get_llm(), _PHASE_5_TOOLS)
     agent_result = await agent.ainvoke(
@@ -308,29 +446,44 @@ async def _phase_5_estimate_node(state: ProjectState) -> dict[str, Any]:
                 {
                     "role": "user",
                     "content": (
-                        f"Estimate effort for project {state.get('project_id')}. "
-                        "Use get_historical_projects and estimate_effort tools."
+                        f"Estimate effort for this project:\n{proposal_summary}\n\n"
+                        f"Team size: {team_size}\n\n"
+                        "1. Use get_historical_projects to get reference data.\n"
+                        "2. Use estimate_effort with the proposal summary, team size, and reference projects.\n"
+                        "Return the full estimation result."
                     ),
                 }
             ]
         }
     )
+
+    # Extract effort data from tool call results
+    effort: dict = {"total_weeks": 8, "total_points": 32, "confidence": 0.7}
+    for msg in agent_result.get("messages", []):
+        if hasattr(msg, "content") and isinstance(msg.content, str):
+            try:
+                parsed = _json.loads(msg.content)
+                if isinstance(parsed, dict) and "total_weeks" in parsed:
+                    effort = parsed
+                    break
+            except _json.JSONDecodeError:
+                pass
+
     ps = dict(state.get("phase_status") or {})
     ps["phase_5"] = "complete"
-    return {
-        "phase_status": ps,
-        "effort_estimates": {
-            "total_weeks": 8,
-            "total_points": 32,
-            "agent_messages": len(agent_result.get("messages", [])),
-        },
-    }
+    return {"phase_status": ps, "effort_estimates": effort}
 
 
 async def _phase_6_epics_node(state: ProjectState) -> dict[str, Any]:
-    """Phase 6: Epic & task generation — ReAct agent, then GitHub sync."""
+    """Phase 6: Epic & task generation — ReAct agent with structured LLM output."""
     _require_phase_complete(state, 6)
-    from app.services.llm_factory import get_llm
+
+    proposal_summary = state.get("proposal_state", {}).get("summary", "No proposal available.")
+    tech_stack = state.get("tech_stack") or {}
+    tech_stack_summary = ", ".join(
+        tech_stack.get("frontend", []) + tech_stack.get("backend", []) +
+        tech_stack.get("database", []) + tech_stack.get("infra", [])
+    ) or "Standard web stack"
 
     agent = create_react_agent(get_llm(), _PHASE_6_TOOLS)
     agent_result = await agent.ainvoke(
@@ -339,19 +492,31 @@ async def _phase_6_epics_node(state: ProjectState) -> dict[str, Any]:
                 {
                     "role": "user",
                     "content": (
-                        f"Generate epics and tasks for project {state.get('project_id')}. "
-                        "Use generate_epics_tool."
+                        f"Generate epics and tasks for this project.\n\n"
+                        f"Proposal: {proposal_summary}\n\n"
+                        f"Tech stack: {tech_stack_summary}\n\n"
+                        "Use generate_epics_tool with the proposal and tech stack summaries."
                     ),
                 }
             ]
         }
     )
+
+    # Extract epics from tool call results
+    epics: list = []
+    for msg in agent_result.get("messages", []):
+        if hasattr(msg, "content") and isinstance(msg.content, str):
+            try:
+                parsed = _json.loads(msg.content)
+                if isinstance(parsed, list) and parsed and "title" in parsed[0]:
+                    epics = parsed
+                    break
+            except _json.JSONDecodeError:
+                pass
+
     ps = dict(state.get("phase_status") or {})
     ps["phase_6"] = "complete"
-    return {
-        "phase_status": ps,
-        "epics": agent_result.get("epics", []),
-    }
+    return {"phase_status": ps, "epics": epics}
 
 
 # ---------------------------------------------------------------------------

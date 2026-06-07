@@ -14,6 +14,7 @@ from app.models.enums import (
     TBDStatus,
 )
 from app.models.project import Document, Project, Proposal
+from app.models.sync import Epic, Task
 from app.schemas.clarification import ClarificationCreate, ClarificationResponse
 from app.schemas.document import (
     DocumentResponse,
@@ -29,6 +30,7 @@ from app.schemas.project import (
     ProjectResponse,
     TBDItem,
     TechStackResponse,
+    TeamResponse,
     phase_to_int,
 )
 from app.schemas.proposal import ProposalResponse
@@ -428,6 +430,9 @@ async def suggest_stack(
     except Exception:
         pass
 
+    project.tech_stack = tech_stack
+    db.commit()
+
     if project.phase == ProjectPhase.chat:
         project.phase = ProjectPhase.techstack
         db.commit()
@@ -439,6 +444,30 @@ async def suggest_stack(
         infra=tech_stack.get("infra", ["Railway"]),
         rationale=tech_stack.get("rationale", "Stub — LangGraph not yet invoked for this project."),
     )
+
+
+@router.post("/projects/{project_id}/team", response_model=TeamResponse)
+async def suggest_team(
+    project_id: str,
+    db: Session = Depends(get_db),
+) -> TeamResponse:
+    project = _get_project_or_404(project_id, db)
+
+    team: dict = {}
+    try:
+        from app.services.workflow import run_phase
+        state = await run_phase(str(project.id))
+        team = state.get("team_suggestion") or {}
+    except Exception:
+        pass
+
+    project.team_suggestion = team
+    if project.phase == ProjectPhase.techstack:
+        project.phase = ProjectPhase.team
+    db.commit()
+
+    members = team.get("members", [])
+    return TeamResponse(members=members, total=len(members))
 
 
 @router.post("/projects/{project_id}/estimate", response_model=EstimationResponse)
@@ -462,6 +491,9 @@ async def estimate_effort(
     except Exception:
         pass
 
+    project.effort_estimates = effort
+    db.commit()
+
     if project.phase == ProjectPhase.team:
         project.phase = ProjectPhase.estimation
         db.commit()
@@ -473,13 +505,141 @@ async def estimate_effort(
     )
 
 
+@router.post("/projects/{project_id}/epics")
+async def generate_epics(
+    project_id: str,
+    db: Session = Depends(get_db),
+) -> dict:
+    project = _get_project_or_404(project_id, db)
+
+    epics_data: list = []
+    try:
+        from app.services.workflow import run_phase
+        state = await run_phase(str(project.id))
+        epics_data = state.get("epics") or []
+    except Exception:
+        pass
+
+    import json as _json_mod
+    for epic_dict in epics_data:
+        epic = Epic(
+            project_id=int(project_id),
+            title=epic_dict["title"],
+            description=epic_dict.get("description", ""),
+            sync_status="pending",
+        )
+        db.add(epic)
+        db.flush()
+
+        for task_dict in epic_dict.get("tasks", []):
+            task = Task(
+                epic_id=epic.id,
+                title=task_dict["title"],
+                description=task_dict.get("description", ""),
+                estimated_points=task_dict.get("story_points", 3),
+                labels=_json_mod.dumps(task_dict.get("labels", [])),
+                sync_status="pending",
+            )
+            db.add(task)
+
+    db.commit()
+
+    if project.phase == ProjectPhase.estimation:
+        project.phase = ProjectPhase.epics
+        db.commit()
+
+    return {"epics": epics_data, "count": len(epics_data)}
+
+
+@router.get("/projects/{project_id}/epics")
+def get_epics(
+    project_id: str,
+    db: Session = Depends(get_db),
+) -> dict:
+    import json as _json_mod
+    _get_project_or_404(project_id, db)
+    epics = db.query(Epic).filter(Epic.project_id == int(project_id)).all()
+    result = []
+    for epic in epics:
+        tasks_data = []
+        for t in epic.tasks:
+            try:
+                labels = _json_mod.loads(t.labels) if t.labels else []
+            except (_json_mod.JSONDecodeError, TypeError):
+                labels = []
+            try:
+                assignees = _json_mod.loads(t.assignees) if t.assignees else []
+            except (_json_mod.JSONDecodeError, TypeError):
+                assignees = []
+            tasks_data.append({
+                "id": t.id,
+                "title": t.title,
+                "description": t.description,
+                "story_points": t.estimated_points or 3,
+                "labels": labels,
+                "assignees": assignees,
+                "sync_status": t.sync_status.value if hasattr(t.sync_status, "value") else str(t.sync_status),
+                "github_issue_number": t.github_issue_number,
+                "github_issue_url": t.github_issue_url,
+            })
+        result.append({
+            "id": epic.id,
+            "title": epic.title,
+            "description": epic.description,
+            "sync_status": epic.sync_status.value if hasattr(epic.sync_status, "value") else str(epic.sync_status),
+            "github_milestone_number": epic.github_milestone_number,
+            "github_milestone_url": epic.github_milestone_url,
+            "tasks": tasks_data,
+        })
+    return {"epics": result}
+
+
 @router.post("/projects/{project_id}/sync", response_model=SyncResponse)
 def sync_to_github(
     project_id: str,
     db: Session = Depends(get_db),
 ) -> SyncResponse:
+    import json as _json_mod
     from app.services.github_sync import sync_epics_to_github
-    result = sync_epics_to_github(epics=[])
+
+    _get_project_or_404(project_id, db)
+    epics = db.query(Epic).filter(Epic.project_id == int(project_id)).all()
+
+    epics_payload = []
+    for epic in epics:
+        tasks_payload = []
+        for t in epic.tasks:
+            try:
+                labels = _json_mod.loads(t.labels) if t.labels else ["task"]
+            except (_json_mod.JSONDecodeError, TypeError):
+                labels = ["task"]
+            try:
+                assignees = _json_mod.loads(t.assignees) if t.assignees else []
+            except (_json_mod.JSONDecodeError, TypeError):
+                assignees = []
+            tasks_payload.append({
+                "title": t.title,
+                "body": t.description or "",
+                "labels": labels,
+                "assignees": assignees,
+            })
+        epics_payload.append({
+            "title": epic.title,
+            "description": epic.description or "",
+            "due_date": "",
+            "tasks": tasks_payload,
+        })
+
+    result = sync_epics_to_github(epics=epics_payload)
+
+    # Update sync_status in DB
+    from app.models.enums import SyncStatus as DBSyncStatus
+    for epic in epics:
+        epic.sync_status = DBSyncStatus.synced
+        for t in epic.tasks:
+            t.sync_status = DBSyncStatus.synced
+    db.commit()
+
     return SyncResponse(**result)
 
 

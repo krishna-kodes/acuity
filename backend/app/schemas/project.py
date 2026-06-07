@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 _PHASE_ORDER = {
     "redaction": 1,
@@ -53,3 +53,26 @@ class EstimationResponse(BaseModel):
 class ChatRequest(BaseModel):
     message: str
     proceed: bool = False
+
+
+class TaskOutput(BaseModel):
+    title: str
+    description: str
+    story_points: int = Field(ge=1, le=13, default=3)
+    labels: list[str] = Field(default_factory=list)
+
+
+class EpicOutput(BaseModel):
+    title: str
+    description: str
+    due_date: str  # "YYYY-MM-DD"
+    tasks: list[TaskOutput] = Field(default_factory=list)
+
+
+class EpicsOutput(BaseModel):
+    epics: list[EpicOutput] = Field(min_length=1, max_length=10)
+
+
+class TeamResponse(BaseModel):
+    members: list[dict]
+    total: int
