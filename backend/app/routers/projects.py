@@ -783,12 +783,59 @@ def get_metrics(
     project_id: str,
     db: Session = Depends(get_db),
 ) -> MetricsResponse:
+    import statistics
+    from app.models.observability import ErrorLog, LatencyLog, Metric
+    from app.schemas.metrics import ErrorPhaseItem, LatencyNodeItem, TokenPhaseItem
+
     _get_project_or_404(project_id, db)
-    # TODO(Epic 5 #40): aggregate from metrics + latency_logs tables
+    pid = int(project_id)
+
+    # Token aggregation
+    metric_rows = db.query(Metric).filter(Metric.project_id == pid).all()
+    total_tokens = sum(r.input_tokens + r.output_tokens for r in metric_rows)
+    total_cost = sum(r.cost_usd for r in metric_rows)
+    phase_token_map: dict[str, dict] = {}
+    for r in metric_rows:
+        e = phase_token_map.setdefault(r.phase, {"tokens": 0, "cost": 0.0})
+        e["tokens"] += r.input_tokens + r.output_tokens
+        e["cost"] += r.cost_usd
+
+    # Latency aggregation (p50/p95 per node)
+    latency_rows = db.query(LatencyLog).filter(LatencyLog.project_id == pid).all()
+    node_durations: dict[str, list[float]] = {}
+    for r in latency_rows:
+        node_durations.setdefault(r.node_name, []).append(r.duration_ms)
+    latency_by_node = [
+        LatencyNodeItem(
+            node=node,
+            p50=statistics.median(durations),
+            p95=sorted(durations)[int(len(durations) * 0.95)] if len(durations) > 1 else durations[0],
+        )
+        for node, durations in node_durations.items()
+    ]
+    phase_latencies = {
+        node: statistics.median(durations) for node, durations in node_durations.items()
+    }
+
+    # Error aggregation per phase
+    error_rows = db.query(ErrorLog).filter(ErrorLog.project_id == pid).all()
+    phase_error_map: dict[str, int] = {}
+    for r in error_rows:
+        phase_error_map[r.phase or "unknown"] = phase_error_map.get(r.phase or "unknown", 0) + 1
+
     return MetricsResponse(
-        total_tokens=0,
-        total_cost_usd=0.0,
-        phase_latencies={},
+        total_tokens=total_tokens,
+        total_cost_usd=round(total_cost, 6),
+        phase_latencies=phase_latencies,
         eval_pass_rate=0.0,
         github_sync_success_rate=0.0,
+        tokens_by_phase=[
+            TokenPhaseItem(phase=p, tokens=v["tokens"], cost=round(v["cost"], 6))
+            for p, v in phase_token_map.items()
+        ],
+        latency_by_node=latency_by_node,
+        errors_by_phase=[
+            ErrorPhaseItem(phase=p, errors=c) for p, c in phase_error_map.items()
+        ],
+        error_count=len(error_rows),
     )

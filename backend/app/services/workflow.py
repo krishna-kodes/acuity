@@ -27,6 +27,7 @@ from app.models.employee import Employee, EmployeeSkill, Skill
 from app.models.reference import ApprovedTechnology, HistoricalProject
 from app.services.llm_factory import get_llm
 from app.services.rag import retrieve
+from app.services.metrics_tracker import calc_cost, record_latency, record_tokens
 from app.services.tbd_detection import detect_tbds, persist_tbds
 
 # ---------------------------------------------------------------------------
@@ -296,11 +297,21 @@ async def _chat_turn_node(state: ProjectState) -> dict[str, Any]:
             for m in messages
         ],
     ]
+    import time as _time
     llm = get_llm()
     response_parts: list[str] = []
+    _llm_usage: dict | None = None
+    _t0 = _time.monotonic()
     async for chunk in llm.with_config({"run_name": "chat_response"}).astream(lc_messages):
         if isinstance(chunk.content, str):
             response_parts.append(chunk.content)
+        if hasattr(chunk, "usage_metadata") and chunk.usage_metadata:
+            _llm_usage = dict(chunk.usage_metadata)
+    record_latency(int(project_id), "phase_2", "chat_turn_node", (_time.monotonic() - _t0) * 1000)
+    if _llm_usage:
+        _inp = _llm_usage.get("input_tokens", 0)
+        _out = _llm_usage.get("output_tokens", 0)
+        record_tokens(int(project_id), "phase_2", settings.main_llm_model, _inp, _out, calc_cost(_inp, _out))
     response_content = "".join(response_parts)
 
     groundedness_score = None
@@ -405,12 +416,15 @@ async def _phase_3_stack_node(state: ProjectState) -> dict[str, Any]:
     }
 
     try:
+        import time as _time
         llm = get_llm(fast=False).with_structured_output(_TechStackChoice)
+        _t0 = _time.monotonic()
         result = llm.invoke(
             f"Given this project proposal:\n{proposal_summary}\n\n"
             f"Select the most appropriate technologies from this approved list:\n{tech_descriptions}\n\n"
             "Choose 1-3 per category. Return frontend, backend, database, infra lists and a brief rationale."
         )
+        record_latency(int(state["project_id"]), "phase_3", "tech_stack_node", (_time.monotonic() - _t0) * 1000)
         tech_stack = result.model_dump()
         ps["phase_3"] = "complete"
     except Exception:
@@ -421,6 +435,7 @@ async def _phase_3_stack_node(state: ProjectState) -> dict[str, Any]:
 
 async def _phase_4_team_node(state: ProjectState) -> dict[str, Any]:
     """Phase 4: Team suggestion — ReAct agent queries employee skills."""
+    import time as _time
     _require_phase_complete(state, 4)
 
     tech_stack = state.get("tech_stack") or {}
@@ -430,6 +445,7 @@ async def _phase_4_team_node(state: ProjectState) -> dict[str, Any]:
     )
 
     agent = create_react_agent(get_llm(), _PHASE_4_TOOLS)
+    _t0 = _time.monotonic()
     agent_result = await agent.ainvoke(
         {
             "messages": [
@@ -457,6 +473,7 @@ async def _phase_4_team_node(state: ProjectState) -> dict[str, Any]:
             except (_json.JSONDecodeError, (KeyError, IndexError)):
                 pass
 
+    record_latency(int(state["project_id"]), "phase_4", "team_node", (_time.monotonic() - _t0) * 1000)
     ps = dict(state.get("phase_status") or {})
     ps["phase_4"] = "complete"
     return {
@@ -467,12 +484,14 @@ async def _phase_4_team_node(state: ProjectState) -> dict[str, Any]:
 
 async def _phase_5_estimate_node(state: ProjectState) -> dict[str, Any]:
     """Phase 5: Effort estimation — ReAct agent pulls historical data."""
+    import time as _time
     _require_phase_complete(state, 5)
 
     proposal_summary = state.get("proposal_state", {}).get("summary", "No proposal available.")
     team_size = len(state.get("team_suggestion", {}).get("members", [])) or 3
 
     agent = create_react_agent(get_llm(), _PHASE_5_TOOLS)
+    _t0 = _time.monotonic()
     agent_result = await agent.ainvoke(
         {
             "messages": [
@@ -502,6 +521,7 @@ async def _phase_5_estimate_node(state: ProjectState) -> dict[str, Any]:
             except _json.JSONDecodeError:
                 pass
 
+    record_latency(int(state["project_id"]), "phase_5", "estimation_node", (_time.monotonic() - _t0) * 1000)
     ps = dict(state.get("phase_status") or {})
     ps["phase_5"] = "complete"
     return {"phase_status": ps, "effort_estimates": effort}
@@ -509,6 +529,7 @@ async def _phase_5_estimate_node(state: ProjectState) -> dict[str, Any]:
 
 async def _phase_6_epics_node(state: ProjectState) -> dict[str, Any]:
     """Phase 6: Epic & task generation — ReAct agent with structured LLM output."""
+    import time as _time
     _require_phase_complete(state, 6)
 
     proposal_summary = state.get("proposal_state", {}).get("summary", "No proposal available.")
@@ -519,6 +540,7 @@ async def _phase_6_epics_node(state: ProjectState) -> dict[str, Any]:
     ) or "Standard web stack"
 
     agent = create_react_agent(get_llm(), _PHASE_6_TOOLS)
+    _t0 = _time.monotonic()
     agent_result = await agent.ainvoke(
         {
             "messages": [
@@ -547,6 +569,7 @@ async def _phase_6_epics_node(state: ProjectState) -> dict[str, Any]:
             except _json.JSONDecodeError:
                 pass
 
+    record_latency(int(state["project_id"]), "phase_6", "epics_node", (_time.monotonic() - _t0) * 1000)
     ps = dict(state.get("phase_status") or {})
     ps["phase_6"] = "complete"
     return {"phase_status": ps, "epics": epics}
