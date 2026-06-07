@@ -1,4 +1,7 @@
-"""LLM provider factory — switchable via MAIN_LLM_PROVIDER / FAST_LLM_PROVIDER env vars."""
+"""LLM provider factory — switchable via MAIN_LLM_PROVIDER / FAST_LLM_PROVIDER env vars.
+
+Supported providers: 'google', 'openai'.
+"""
 
 from langchain_core.language_models.chat_models import BaseChatModel
 
@@ -28,16 +31,16 @@ def get_llm(fast: bool = False) -> BaseChatModel:
             google_api_key=settings.google_api_key or None,
         )
 
-    if provider == "anthropic":
-        from langchain_anthropic import ChatAnthropic
+    if provider == "openai":
+        from langchain_openai import ChatOpenAI
 
-        return ChatAnthropic(
+        return ChatOpenAI(
             model=model,
             temperature=temperature,
-            anthropic_api_key=settings.anthropic_api_key or None,
+            api_key=settings.openai_api_key or None,
         )
 
-    raise ValueError(f"Unknown LLM provider: {provider!r}. Expected 'google' or 'anthropic'.")
+    raise ValueError(f"Unknown LLM provider: {provider!r}. Expected 'google' or 'openai'.")
 
 
 def get_fast_llm() -> BaseChatModel:
