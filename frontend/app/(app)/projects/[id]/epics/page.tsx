@@ -1,86 +1,50 @@
 "use client";
 
-import { useState, use } from "react";
+import { useState, useEffect, use } from "react";
 import { PhaseProgressStepper } from "@/components/phase-progress-stepper";
 import { EpicTaskListItem } from "@/components/epic-task-list-item";
 import { SyncStatusBadge } from "@/components/sync-status-badge";
-import { ErrorBanner } from "@/components/page-states";
+import { ErrorBanner, ReviewPageSkeleton } from "@/components/page-states";
 import { getPhasesForRoute } from "@/lib/project-phases";
 import type { EpicItem } from "@/components/epic-task-list-item";
 import type { SyncStatus } from "@/components/sync-status-badge";
 import { cn } from "@/lib/utils";
+import { getEpics, triggerEpics } from "@/lib/api";
 
-// TODO (Epic 4): fetch from GET /api/v1/projects/{id}/epics
-const INITIAL_EPICS: EpicItem[] = [
-  {
-    id: "e1",
-    title: "Document Ingestion Pipeline",
-    points: 34,
-    syncStatus: "pending",
-    selected: true,
-    tasks: [
-      { id: "t1", title: "PDF/DOCX parser with structure detection",             points: 8,  assignee: "Priya Nair",   syncStatus: "pending" },
-      { id: "t2", title: "Hybrid chunking strategy (header + paragraph + size)", points: 13, assignee: "Priya Nair",   syncStatus: "pending" },
-      { id: "t3", title: "ChromaDB PersistentClient integration",                points: 5,  assignee: "Priya Nair",   syncStatus: "pending" },
-      { id: "t4", title: "Embedding pipeline with text-embedding-3-small",       points: 8,  assignee: "Priya Nair",   syncStatus: "pending" },
-    ],
-  },
-  {
-    id: "e2",
-    title: "PII Detection & Redaction",
-    points: 21,
-    syncStatus: "pending",
-    selected: true,
-    tasks: [
-      { id: "t5", title: "Regex-based PII detection (Email, Phone, Card)",       points: 5,  assignee: "Sam Okonkwo",  syncStatus: "pending" },
-      { id: "t6", title: "spaCy NER integration (Person, Org, Location)",        points: 8,  assignee: "Sam Okonkwo",  syncStatus: "pending" },
-      { id: "t7", title: "Fernet encryption for confirmed PII",                  points: 5,  assignee: "Sam Okonkwo",  syncStatus: "pending" },
-      { id: "t8", title: "Redaction review UI wiring to backend",               points: 3,  assignee: "Jordan Kim",   syncStatus: "pending" },
-    ],
-  },
-  {
-    id: "e3",
-    title: "RAG Chat & Refinement",
-    points: 42,
-    syncStatus: "pending",
-    selected: true,
-    tasks: [
-      { id: "t9",  title: "Query rewriting (3 sub-queries via fast LLM)",        points: 8,  assignee: "Priya Nair",   syncStatus: "pending" },
-      { id: "t10", title: "BM25 sparse retrieval integration",                   points: 5,  assignee: "Priya Nair",   syncStatus: "pending" },
-      { id: "t11", title: "BERT cross-encoder reranker (ms-marco-MiniLM)",       points: 8,  assignee: "Priya Nair",   syncStatus: "pending" },
-      { id: "t12", title: "TBD detection (Level 1 + Level 2)",                  points: 8,  assignee: "Alex Rivera",  syncStatus: "pending" },
-      { id: "t13", title: "Clarifications API + chat frontend wiring",           points: 8,  assignee: "Jordan Kim",   syncStatus: "pending" },
-      { id: "t14", title: "Proposal generation from refined requirements",        points: 5,  assignee: "Alex Rivera",  syncStatus: "pending" },
-    ],
-  },
-  {
-    id: "e4",
-    title: "LangGraph Agent (Phases 4–6)",
-    points: 55,
-    syncStatus: "pending",
-    selected: true,
-    tasks: [
-      { id: "t15", title: "LangGraph ReAct graph with SqliteSaver checkpointer", points: 13, assignee: "Alex Rivera",  syncStatus: "pending" },
-      { id: "t16", title: "Team suggestion node (skills + availability filter)", points: 8,  assignee: "Alex Rivera",  syncStatus: "pending" },
-      { id: "t17", title: "Effort estimation node (historical retrieval)",       points: 13, assignee: "Alex Rivera",  syncStatus: "pending" },
-      { id: "t18", title: "Epic/task generation with Pydantic structured output",points: 13, assignee: "Alex Rivera",  syncStatus: "pending" },
-      { id: "t19", title: "GitHub MCP sync (milestones + issues)",               points: 8,  assignee: "Sam Okonkwo",  syncStatus: "pending" },
-    ],
-  },
-  {
-    id: "e5",
-    title: "Eval Layer",
-    points: 34,
-    syncStatus: "skipped",
-    selected: false,
-    tasks: [
-      { id: "t20", title: "10–15 test cases in test_cases.json",                 points: 5,  syncStatus: "skipped" },
-      { id: "t21", title: "Code-based graders (retrieval, tool selection, loop)",points: 8,  syncStatus: "skipped" },
-      { id: "t22", title: "Semantic + LLM-as-judge graders",                     points: 8,  syncStatus: "skipped" },
-      { id: "t23", title: "HybridRAGAgentEval harness + CI gate",                points: 13, syncStatus: "skipped" },
-    ],
-  },
-];
+type ApiEpic = {
+  id: number;
+  title: string;
+  description: string | null;
+  sync_status: string;
+  github_milestone_number: number | null;
+  github_milestone_url: string | null;
+  tasks: Array<{
+    id: number;
+    title: string;
+    description: string | null;
+    story_points: number;
+    labels: string[];
+    sync_status: string;
+    github_issue_number: number | null;
+    github_issue_url: string | null;
+  }>;
+};
+
+function mapApiEpics(apiEpics: ApiEpic[]): EpicItem[] {
+  return apiEpics.map((e) => ({
+    id: String(e.id),
+    title: e.title,
+    points: e.tasks.reduce((sum, t) => sum + (t.story_points ?? 0), 0),
+    syncStatus: (e.sync_status as SyncStatus) ?? "pending",
+    selected: e.sync_status !== "skipped",
+    tasks: e.tasks.map((t) => ({
+      id: String(t.id),
+      title: t.title,
+      points: t.story_points ?? 3,
+      syncStatus: (t.sync_status as SyncStatus) ?? "pending",
+    })),
+  }));
+}
 
 type SyncState = "idle" | "syncing" | "done" | "error";
 
@@ -103,9 +67,45 @@ function SyncSummary({ epics }: { epics: EpicItem[] }) {
 
 export default function EpicsPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
-  const [epics, setEpics]       = useState<EpicItem[]>(INITIAL_EPICS);
+  const [epics, setEpics]       = useState<EpicItem[]>([]);
   const [syncState, setSyncState] = useState<SyncState>("idle");
   const [syncError, setSyncError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    getEpics(id)
+      .then((data) => {
+        if (data.epics.length > 0) {
+          setEpics(mapApiEpics(data.epics));
+          setLoading(false);
+        } else {
+          return triggerEpics(id).then((genData) => {
+            setEpics(mapApiEpics(genData.epics.map((e, i) => ({
+              id: i + 1,
+              title: e.title,
+              description: e.description,
+              sync_status: "pending",
+              github_milestone_number: null,
+              github_milestone_url: null,
+              tasks: e.tasks.map((t, j) => ({
+                id: (i + 1) * 100 + j,
+                title: t.title,
+                description: t.description,
+                story_points: t.story_points,
+                labels: t.labels,
+                sync_status: "pending",
+                github_issue_number: null,
+                github_issue_url: null,
+              })),
+            }))));
+          });
+        }
+      })
+      .catch(() => { /* stay with empty list */ })
+      .finally(() => setLoading(false));
+  }, [id]);
+
+  if (loading) return <ReviewPageSkeleton />;
 
   const selectedCount = epics.filter((e) => e.selected).length;
   const selectedPoints = epics.filter((e) => e.selected).reduce((s, e) => s + e.points, 0);
@@ -133,24 +133,17 @@ export default function EpicsPage({ params }: { params: Promise<{ id: string }> 
     setSyncError(null);
 
     try {
-      // TODO (Epic 4): POST /api/v1/projects/{id}/sync
-      // Simulates per-epic milestone creation with a brief delay
-      await new Promise((res) => setTimeout(res, 2000));
+      const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+      const res = await fetch(`${apiBase}/api/v1/projects/${id}/sync`, { method: "POST" });
+      if (!res.ok) throw new Error(`Sync failed: ${res.status}`);
 
-      setEpics((prev) =>
-        prev.map((e) => ({
-          ...e,
-          syncStatus: e.selected ? "synced" : "skipped",
-          tasks: e.tasks.map((t) => ({
-            ...t,
-            syncStatus: e.selected ? "synced" : ("skipped" as SyncStatus),
-          })),
-        }))
-      );
+      // Reload epics to get updated sync status + GitHub URLs
+      const data = await getEpics(id);
+      setEpics(mapApiEpics(data.epics));
       setSyncState("done");
-    } catch {
+    } catch (err) {
       setSyncState("error");
-      setSyncError("GitHub sync failed. Check your GITHUB_TOKEN and try again.");
+      setSyncError(err instanceof Error ? err.message : "GitHub sync failed. Check your GITHUB_TOKEN and try again.");
     }
   }
 

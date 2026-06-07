@@ -111,3 +111,25 @@ export const resetDb = () =>
 
 export const getProposalExportUrl = (projectId: string): string =>
   `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"}/api/v1/projects/${projectId}/export/proposal`
+
+// ── New phase endpoints (not yet in api.types — use raw fetch) ────────────────
+
+const _apiBase = () => process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"
+
+export async function triggerTeam(projectId: string): Promise<{ members: Array<{ id: number; name: string; seniority: string; availability_pct: number; skills: string[] }>; total: number }> {
+  const res = await fetch(`${_apiBase()}/api/v1/projects/${projectId}/team`, { method: "POST" })
+  if (!res.ok) throw new Error(`Team suggestion failed: ${res.status}`)
+  return res.json()
+}
+
+export async function triggerEpics(projectId: string): Promise<{ epics: Array<{ title: string; description: string; due_date: string; tasks: Array<{ title: string; description: string; story_points: number; labels: string[] }> }>; count: number }> {
+  const res = await fetch(`${_apiBase()}/api/v1/projects/${projectId}/epics`, { method: "POST" })
+  if (!res.ok) throw new Error(`Epic generation failed: ${res.status}`)
+  return res.json()
+}
+
+export async function getEpics(projectId: string): Promise<{ epics: Array<{ id: number; title: string; description: string; sync_status: string; github_milestone_number: number | null; github_milestone_url: string | null; tasks: Array<{ id: number; title: string; description: string; story_points: number; labels: string[]; sync_status: string; github_issue_number: number | null; github_issue_url: string | null }> }> }> {
+  const res = await fetch(`${_apiBase()}/api/v1/projects/${projectId}/epics`)
+  if (!res.ok) throw new Error(`Fetch epics failed: ${res.status}`)
+  return res.json()
+}
