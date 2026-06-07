@@ -290,3 +290,36 @@ export async function getDocumentStatus(projectId: string): Promise<{ status: st
   if (!res.ok) throw new Error(`Status check failed: ${res.status}`)
   return res.json()
 }
+
+// ── Modules ───────────────────────────────────────────────────────────────────
+
+export type Module = { id: string; title: string; label: string; description: string }
+export type ModulesData = { modules: Module[] }
+
+export async function extractModules(projectId: string): Promise<ModulesData> {
+  const res = await fetch(`${_apiBase()}/api/v1/projects/${projectId}/modules`, { method: "POST" })
+  if (!res.ok) throw new Error(`Extract modules failed: ${res.status}`)
+  return res.json()
+}
+
+export async function getModules(projectId: string): Promise<ModulesData> {
+  const res = await fetch(`${_apiBase()}/api/v1/projects/${projectId}/modules`)
+  if (!res.ok) throw new Error(`Get modules failed: ${res.status}`)
+  return res.json()
+}
+
+export async function saveModules(projectId: string, modules: Module[]): Promise<ModulesData> {
+  const res = await fetch(`${_apiBase()}/api/v1/projects/${projectId}/modules`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ modules }),
+  })
+  if (!res.ok) throw new Error(`Save modules failed: ${res.status}`)
+  return res.json()
+}
+
+export async function approveModules(projectId: string): Promise<ModulesData> {
+  const res = await fetch(`${_apiBase()}/api/v1/projects/${projectId}/modules/approve`, { method: "POST" })
+  if (!res.ok) throw new Error(`Approve modules failed: ${res.status}`)
+  return res.json()
+}

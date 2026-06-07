@@ -6,7 +6,8 @@ import { PhaseProgressStepper } from "@/components/phase-progress-stepper";
 import { MetricsStatCard } from "@/components/metrics-stat-card";
 import { getPhasesForRoute, getNextPhaseRoute } from "@/lib/project-phases";
 import { cn } from "@/lib/utils";
-import { estimateEffort } from "@/lib/api";
+import { estimateEffort, getModules } from "@/lib/api";
+import type { Module } from "@/lib/api";
 
 interface EpicEstimate {
   title: string;
@@ -27,6 +28,7 @@ export default function EstimationPage({ params }: { params: Promise<{ id: strin
   const [proceeding, setProceeding] = useState(false);
   const [loading, setLoading] = useState(true);
   const [effort, setEffort] = useState<EffortData | null>(null);
+  const [modules, setModules] = useState<Module[]>([]);
 
   useEffect(() => {
     estimateEffort(id)
@@ -35,6 +37,10 @@ export default function EstimationPage({ params }: { params: Promise<{ id: strin
       })
       .catch(() => {})
       .finally(() => setLoading(false));
+
+    getModules(id)
+      .then((data) => setModules(data.modules))
+      .catch(() => {});
   }, [id]);
 
   async function handleProceed() {
@@ -124,6 +130,25 @@ export default function EstimationPage({ params }: { params: Promise<{ id: strin
             </div>
           </div>
         </div>
+
+        {/* Modules breakdown */}
+        {modules.length > 0 && (
+          <div className="flex flex-col gap-2">
+            <p className="text-xs font-semibold text-text-muted uppercase tracking-wide">Work Modules</p>
+            <div className="flex flex-wrap gap-2">
+              {modules.map((m) => (
+                <span
+                  key={m.id}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[11px] font-medium bg-surface-subtle text-text-secondary border-border"
+                >
+                  <span className="w-1.5 h-1.5 rounded-full bg-primary/60 shrink-0" />
+                  <span className="font-semibold text-text-muted">{m.label}</span>
+                  <span className="text-foreground">{m.title}</span>
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
 
         <div className="flex items-center justify-end pt-2 border-t border-border">
           <button
