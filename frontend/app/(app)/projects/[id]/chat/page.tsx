@@ -12,14 +12,20 @@ import type { ChatMessage } from "@/components/chat-thread";
 import type { TBDItem, TBDAction } from "@/components/tbd-clarification-widget";
 import { cn } from "@/lib/utils";
 
-const INITIAL_MESSAGES: ChatMessage[] = [
-  {
-    id: "1",
+function makeWelcomeMessage(tbdCount: number): ChatMessage {
+  const now = new Date();
+  const timestamp = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const tbdLine =
+    tbdCount === 0
+      ? "No open items need clarification — feel free to ask questions or generate the proposal directly."
+      : `I found ${tbdCount} item${tbdCount === 1 ? "" : "s"} that need clarification before I can generate a complete proposal. You can ask me anything about the document, or work through the TBD items on the right.`;
+  return {
+    id: "welcome",
     role: "ai",
-    text: "I've processed your requirements document and anonymized the PII. I found 4 items that need clarification before I can generate a complete proposal. You can ask me anything about the document, or work through the TBD items on the right.",
-    timestamp: "09:41",
-  },
-];
+    text: `I've processed your requirements document and anonymized the PII. ${tbdLine}`,
+    timestamp,
+  };
+}
 
 const TBD_LEVEL_LABELS: Record<number, TBDItem["level"]> = {
   1: "Explicit TBD",
@@ -33,7 +39,7 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
   const { id: projectId } = use(params);
   const router = useRouter();
   const queryClient = useQueryClient();
-  const [messages, setMessages]     = useState<ChatMessage[]>(INITIAL_MESSAGES);
+  const [messages, setMessages]     = useState<ChatMessage[]>([makeWelcomeMessage(0)]);
   const [localStatuses, setLocalStatuses] = useState<Record<string, TBDAction>>({});
   const [input, setInput]           = useState("");
   const [isLoading, setIsLoading]   = useState(false);
@@ -66,6 +72,15 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
 
   const outstandingTbds = tbdItems.filter((t) => t.status === "open").length;
   const allTbdsResolved = tbdItems.length === 0 || outstandingTbds === 0;
+
+  // Update welcome message once TBD count is known
+  useEffect(() => {
+    if (remoteTbds === undefined) return;
+    setMessages((prev) => {
+      if (prev[0]?.id !== "welcome") return prev;
+      return [makeWelcomeMessage(remoteTbds.length), ...prev.slice(1)];
+    });
+  }, [remoteTbds]);
 
   // Auto-scroll on new messages
   useEffect(() => {
