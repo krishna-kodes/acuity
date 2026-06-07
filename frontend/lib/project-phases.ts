@@ -3,25 +3,27 @@ import type { Phase, PhaseStatus } from "@/components/phase-progress-stepper";
 const PHASE_LABELS: string[] = [
   "Ingestion",
   "Refinement",
+  "Modules",
   "Tech Stack",
   "Team",
   "Estimation",
   "Epics & Sync",
 ];
 
-// Route segment → 1-based phase number (0 = before first phase, 7 = all complete)
+// Route segment → 1-based phase number (0 = before first phase, 8 = all complete)
 const ROUTE_TO_PHASE: Record<string, number> = {
   redaction: 1,
   chat:      2,
-  techstack: 3,
-  team:      4,
-  estimation:5,
-  epics:     6,
-  metrics:   7, // all phases complete on metrics screen
+  modules:   3,
+  techstack: 4,
+  team:      5,
+  estimation:6,
+  epics:     7,
+  metrics:   8, // all phases complete on metrics screen
 };
 
 // Ordered phase route segments — used for navigation
-const PHASE_ROUTES = ["redaction", "chat", "techstack", "team", "estimation", "epics"] as const;
+const PHASE_ROUTES = ["redaction", "chat", "modules", "techstack", "team", "estimation", "epics"] as const;
 export type PhaseRoute = typeof PHASE_ROUTES[number];
 
 /**
