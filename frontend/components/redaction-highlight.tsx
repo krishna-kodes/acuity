@@ -20,6 +20,9 @@ interface RedactionHighlightProps {
   onConfirm?: (id: number) => void;
   onOverride?: (id: number) => void;
   onConfirmAll?: () => void;
+  onUndo?: (id: number) => void;
+  onConfirmSelected?: (ids: number[]) => void;
+  onOverrideSelected?: (ids: number[]) => void;
   className?: string;
 }
 
@@ -47,12 +50,18 @@ function ConfidenceBadge({ score }: { score: number }) {
 
 function RedactionRow({
   span,
+  selected,
+  onSelect,
   onConfirm,
   onOverride,
+  onUndo,
 }: {
   span: RedactionSpan;
+  selected: boolean;
+  onSelect: (id: number) => void;
   onConfirm?: (id: number) => void;
   onOverride?: (id: number) => void;
+  onUndo?: (id: number) => void;
 }) {
   const typeStyle = TYPE_COLOR[span.type] ?? "bg-surface-subtle text-text-secondary border-border";
   const isConfirmed = span.decision === "confirmed";
@@ -63,9 +72,19 @@ function RedactionRow({
       className={cn(
         "flex items-center gap-3 px-3.5 py-2.5 border-b border-border last:border-0 transition-colors",
         isConfirmed && "bg-success-subtle/30",
-        isOverridden && "bg-surface-subtle opacity-60"
+        isOverridden && "bg-surface-subtle opacity-60",
+        selected && !isConfirmed && !isOverridden && "bg-accent-subtle/20"
       )}
     >
+      {/* Checkbox */}
+      <input
+        type="checkbox"
+        checked={selected}
+        onChange={() => onSelect(span.id)}
+        className="w-3.5 h-3.5 accent-primary cursor-pointer shrink-0"
+        aria-label={`Select ${span.original}`}
+      />
+
       {/* PII value */}
       <div className="flex-1 min-w-0 flex items-center gap-2">
         <span
@@ -97,9 +116,23 @@ function RedactionRow({
               <polyline points="2,7 5.5,10.5 12,3.5" />
             </svg>
             Redacted
+            <button
+              onClick={() => onUndo?.(span.id)}
+              className="text-[10px] text-text-muted hover:text-foreground underline underline-offset-2 ml-1"
+            >
+              Undo
+            </button>
           </span>
         ) : isOverridden ? (
-          <span className="text-xs text-text-muted font-medium">Kept</span>
+          <span className="text-xs text-text-muted font-medium flex items-center gap-1">
+            Kept
+            <button
+              onClick={() => onUndo?.(span.id)}
+              className="text-[10px] text-text-muted hover:text-foreground underline underline-offset-2 ml-1"
+            >
+              Undo
+            </button>
+          </span>
         ) : (
           <>
             <button
@@ -126,16 +159,61 @@ export function RedactionHighlight({
   onConfirm,
   onOverride,
   onConfirmAll,
+  onUndo,
+  onConfirmSelected,
+  onOverrideSelected,
   className,
 }: RedactionHighlightProps) {
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+
   const confirmed = detections.filter((d) => d.decision === "confirmed").length;
-  const pending = detections.filter((d) => !d.decision).length;
+  const pending   = detections.filter((d) => !d.decision).length;
+  const pendingIds = detections.filter((d) => !d.decision).map((d) => d.id);
+  const allPendingSelected = pendingIds.length > 0 && pendingIds.every((id) => selected.has(id));
+
+  function toggleSelect(id: number) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
+
+  function toggleSelectAll() {
+    if (allPendingSelected) {
+      setSelected(new Set());
+    } else {
+      setSelected(new Set(pendingIds));
+    }
+  }
+
+  function handleConfirmSelected() {
+    const ids = Array.from(selected);
+    onConfirmSelected?.(ids);
+    setSelected(new Set());
+  }
+
+  function handleOverrideSelected() {
+    const ids = Array.from(selected);
+    onOverrideSelected?.(ids);
+    setSelected(new Set());
+  }
 
   return (
     <div className={cn("flex flex-col", className)}>
       {/* Header */}
-      <div className="flex items-center justify-between px-3.5 py-2.5 border-b border-border bg-surface-subtle">
+      <div className="flex items-center justify-between px-3.5 py-2.5 border-b border-border bg-surface-subtle gap-3 flex-wrap">
         <div className="flex items-center gap-3">
+          {/* Select-all checkbox */}
+          {pendingIds.length > 0 && (
+            <input
+              type="checkbox"
+              checked={allPendingSelected}
+              onChange={toggleSelectAll}
+              className="w-3.5 h-3.5 accent-primary cursor-pointer shrink-0"
+              aria-label="Select all pending"
+            />
+          )}
           <span className="text-xs font-semibold text-foreground">
             {detections.length} detection{detections.length !== 1 ? "s" : ""}
           </span>
@@ -143,14 +221,36 @@ export function RedactionHighlight({
             {confirmed} redacted · {pending} pending
           </span>
         </div>
-        {onConfirmAll && pending > 0 && (
-          <button
-            onClick={onConfirmAll}
-            className="text-xs font-medium text-primary hover:text-accent-hover transition-colors"
-          >
-            Redact all
-          </button>
-        )}
+
+        <div className="flex items-center gap-2">
+          {/* Batch actions when items selected */}
+          {selected.size > 0 && (
+            <>
+              <button
+                onClick={handleConfirmSelected}
+                className="text-xs font-medium px-2 py-1 rounded bg-success-subtle text-success border border-success/30 hover:bg-success hover:text-white transition-colors"
+              >
+                Redact Selected ({selected.size})
+              </button>
+              <button
+                onClick={handleOverrideSelected}
+                className="text-xs font-medium px-2 py-1 rounded bg-surface-subtle text-text-secondary border border-border hover:bg-secondary transition-colors"
+              >
+                Keep Selected ({selected.size})
+              </button>
+            </>
+          )}
+
+          {/* Redact all — only when no selection active */}
+          {selected.size === 0 && onConfirmAll && pending > 0 && (
+            <button
+              onClick={onConfirmAll}
+              className="text-xs font-medium text-primary hover:text-accent-hover transition-colors"
+            >
+              Redact all
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Rows */}
@@ -159,8 +259,11 @@ export function RedactionHighlight({
           <RedactionRow
             key={span.id}
             span={span}
+            selected={selected.has(span.id)}
+            onSelect={toggleSelect}
             onConfirm={onConfirm}
             onOverride={onOverride}
+            onUndo={onUndo}
           />
         ))}
       </div>
