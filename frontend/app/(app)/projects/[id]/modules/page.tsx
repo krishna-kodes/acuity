@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, use } from "react";
+import { useState, useEffect, useRef, use } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { PhaseProgressStepper } from "@/components/phase-progress-stepper";
@@ -53,12 +53,15 @@ export default function ModulesPage({ params }: { params: Promise<{ id: string }
   const [newLabel, setNewLabel] = useState<Label>("backend");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
+  // Prevents React StrictMode double-fire from triggering two LLM extraction calls
+  const extractionFiredRef = useRef(false);
 
-  async function runExtraction() {
+  async function runExtraction(isCancelled?: () => boolean) {
     setExtracting(true);
     const tid = toast.loading("Extracting modules from proposal…");
     try {
       const data = await extractModules(id);
+      if (isCancelled?.()) { toast.dismiss(tid); return; }
       setModules(data.modules);
       toast.dismiss(tid);
       toast.success(
@@ -68,26 +71,35 @@ export default function ModulesPage({ params }: { params: Promise<{ id: string }
       );
     } catch {
       toast.dismiss(tid);
-      toast.error("Extraction failed — add modules manually");
+      if (!isCancelled?.()) toast.error("Extraction failed — add modules manually");
     } finally {
       setExtracting(false);
     }
   }
 
-  // On mount: load stored modules; if empty, auto-extract
+  // On mount: load stored modules; if empty, auto-extract.
+  // The extractionFiredRef guard prevents React StrictMode from firing two simultaneous LLM calls.
   useEffect(() => {
-    (async () => {
+    let cancelled = false;
+
+    async function load() {
       try {
         const data = await getModules(id);
+        if (cancelled) return;
         if (data.modules.length > 0) {
           setModules(data.modules);
-        } else {
-          await runExtraction();
+          return;
         }
       } catch {
-        await runExtraction();
+        if (cancelled) return;
       }
-    })();
+      if (extractionFiredRef.current) return;
+      extractionFiredRef.current = true;
+      await runExtraction(() => cancelled);
+    }
+
+    load();
+    return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
@@ -163,7 +175,7 @@ export default function ModulesPage({ params }: { params: Promise<{ id: string }
             </p>
           </div>
           <button
-            onClick={runExtraction}
+            onClick={() => runExtraction()}
             disabled={extracting}
             className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border border-border bg-card hover:bg-surface-subtle transition-colors disabled:opacity-50"
           >
