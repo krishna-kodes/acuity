@@ -1518,6 +1518,10 @@ async def chat(
         "phase_status": existing.values.get("phase_status") or {"phase_1": "complete"},
     }
 
+    # Layer 1: domain classification — raises HTTP 400 if clearly non-PM with high confidence
+    from app.guardrails.domain_classifier import classify as _domain_classify
+    await _domain_classify(body.message, project_id)
+
     async def event_generator():
         try:
             async for event in wf.astream_events(
@@ -1533,13 +1537,23 @@ async def chat(
 
                 elif etype == "on_chain_end" and name == "chat_turn":
                     output = event["data"].get("output", {})
+
+                    # Layer 2: gate blocked — stream gate message instead of LLM response
+                    gate_status = output.get("gate_status")
+                    if gate_status and gate_status != "pass":
+                        yield f"data: {json.dumps({'type': 'gate_blocked', 'status': gate_status, 'message': output.get('gate_message')})}\n\n"
+
                     if tbds := output.get("tbd_items"):
                         yield f"data: {json.dumps({'type': 'tbds', 'items': tbds})}\n\n"
-                    if (gs := output.get("groundedness_score")) is not None:
-                        from app.config import settings
-                        flagged = gs < settings.groundedness_threshold
-                        payload = {"type": "groundedness", "score": gs, "flagged": flagged}
-                        yield f"data: {json.dumps(payload)}\n\n"
+
+                    # Layer 3: groundedness events
+                    gs = output.get("groundedness_score")
+                    if gs is not None:
+                        from app.config import settings as _cfg
+                        flagged = gs < _cfg.groundedness_threshold
+                        yield f"data: {json.dumps({'type': 'groundedness', 'score': gs, 'flagged': flagged})}\n\n"
+                        if flagged:
+                            yield f"data: {json.dumps({'type': 'groundedness_warning', 'score': gs, 'unsupported_claims': output.get('groundedness_unsupported_claims') or [], 'reasoning': output.get('groundedness_reasoning') or '', 'source': 'general_knowledge' if output.get('groundedness_unsupported_claims') else None})}\n\n"
 
             yield f"data: {json.dumps({'type': 'done'})}\n\n"
         except Exception as e:

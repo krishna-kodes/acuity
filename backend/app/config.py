@@ -33,6 +33,10 @@ class Settings(BaseSettings):
     query_rewrite_count: int = 3
     groundedness_check_enabled: bool = True
     groundedness_threshold: float = 0.7
+    domain_classifier_enabled: bool = True
+    domain_classifier_confidence_threshold: float = 0.85
+    retrieval_gate_enabled: bool = True
+    retrieval_confidence_threshold: float = 0.5
     max_cost_per_workflow_usd: float = 0.50
     observability_provider: str = "langsmith"
     langsmith_api_key: str = ""
