@@ -10,11 +10,12 @@ import { listProjects } from "@/lib/api";
 const PHASE_ROUTES: Record<number, string> = {
   1: "redaction",
   2: "chat",
-  3: "techstack",
-  4: "team",
-  5: "estimation",
-  6: "epics",
-  7: "metrics",
+  3: "modules",
+  4: "techstack",
+  5: "team",
+  6: "estimation",
+  7: "epics",
+  8: "metrics",
 };
 
 function phaseRoute(phaseNum: number): string {
@@ -46,7 +47,7 @@ export default function DashboardPage() {
   const projects = data ?? [];
   const totalCount  = projects.length;
   const activeCount = projects.filter((p) => p.status === "active").length;
-  const syncedCount = projects.filter((p) => p.current_phase >= 6).length;
+  const syncedCount = projects.filter((p) => p.current_phase >= 7).length;
 
   return (
     <div className="px-6 py-8 max-w-5xl mx-auto flex flex-col gap-6">

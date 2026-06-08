@@ -3,11 +3,12 @@ from pydantic import BaseModel, Field
 _PHASE_ORDER = {
     "redaction": 1,
     "chat": 2,
-    "techstack": 3,
-    "team": 4,
-    "estimation": 5,
-    "epics": 6,
-    "complete": 7,
+    "modules": 3,
+    "techstack": 4,
+    "team": 5,
+    "estimation": 6,
+    "epics": 7,
+    "complete": 8,
 }
 
 
