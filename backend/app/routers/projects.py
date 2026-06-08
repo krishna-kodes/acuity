@@ -1071,6 +1071,15 @@ async def estimate_effort(
             detail="Phase 4 (team suggestion) must be complete before running effort estimation",
         )
 
+    # Return cached result if estimation already ran
+    cached = project.effort_estimates or {}
+    if cached and project.phase in _POST_ESTIMATION_PHASES:
+        return EstimationResponse(
+            epics=cached.get("epics", []),
+            total_points=cached.get("total_points", 0),
+            total_weeks=cached.get("total_weeks", 0),
+        )
+
     effort: dict = {}
     try:
         from app.services.workflow import run_phase
