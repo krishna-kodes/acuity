@@ -1,11 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useQuery } from "@tanstack/react-query";
+import { useRouter } from "next/navigation";
+import { useState, useRef, useEffect } from "react";
+import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { ProjectCard } from "@/components/project-card";
 import { MetricsStatCard } from "@/components/metrics-stat-card";
 import { DashboardSkeleton, ErrorBanner, EmptyState } from "@/components/page-states";
-import { listProjects } from "@/lib/api";
+import { listAllProjects, archiveProject, unarchiveProject } from "@/lib/api";
+import { cn } from "@/lib/utils";
 
 const PHASE_ROUTES: Record<number, string> = {
   1: "redaction",
@@ -32,22 +35,119 @@ function timeAgo(isoDate: string): string {
   return days === 1 ? "Yesterday" : `${days} days ago`;
 }
 
+function ThreeDotsMenu({
+  projectId,
+  isArchived,
+  onArchive,
+  onUnarchive,
+}: {
+  projectId: string;
+  isArchived: boolean;
+  onArchive: (id: string) => void;
+  onUnarchive: (id: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function handleClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [open]);
+
+  return (
+    <div ref={ref} className="relative shrink-0" onClick={(e) => e.preventDefault()}>
+      <button
+        onClick={(e) => { e.stopPropagation(); e.preventDefault(); setOpen((v) => !v); }}
+        className="flex items-center justify-center w-7 h-7 rounded-md text-text-muted hover:bg-surface-subtle hover:text-foreground transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100"
+        aria-label="Project actions"
+      >
+        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 16 16">
+          <circle cx="8" cy="3" r="1.2" />
+          <circle cx="8" cy="8" r="1.2" />
+          <circle cx="8" cy="13" r="1.2" />
+        </svg>
+      </button>
+
+      {open && (
+        <div className="absolute right-0 top-full mt-1 z-50 w-40 bg-card border border-border rounded-lg shadow-md overflow-hidden">
+          {isArchived ? (
+            <button
+              onClick={(e) => { e.stopPropagation(); e.preventDefault(); onUnarchive(projectId); setOpen(false); }}
+              className="w-full text-left px-3 py-2 text-sm text-foreground hover:bg-surface-subtle transition-colors"
+            >
+              Restore project
+            </button>
+          ) : (
+            <button
+              onClick={(e) => { e.stopPropagation(); e.preventDefault(); onArchive(projectId); setOpen(false); }}
+              className="w-full text-left px-3 py-2 text-sm text-foreground hover:bg-surface-subtle transition-colors"
+            >
+              Archive project
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function DashboardPage() {
+  const queryClient = useQueryClient();
+  const router = useRouter();
+  const [showArchived, setShowArchived] = useState(false);
+
   const { data, isLoading, isError, error, refetch } = useQuery({
-    queryKey: ["projects"],
-    queryFn: async () => {
-      const { data, error } = await listProjects();
-      if (error) throw new Error(String(error));
-      return data ?? [];
-    },
+    queryKey: ["projects-all"],
+    queryFn: listAllProjects,
+  });
+
+  const archive = useMutation({
+    mutationFn: archiveProject,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["projects-all"] }),
+  });
+
+  const unarchive = useMutation({
+    mutationFn: unarchiveProject,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["projects-all"] }),
   });
 
   if (isLoading) return <DashboardSkeleton />;
 
-  const projects = data ?? [];
-  const totalCount  = projects.length;
-  const activeCount = projects.filter((p) => p.status === "active").length;
-  const syncedCount = projects.filter((p) => p.current_phase >= 7).length;
+  const allProjects = data ?? [];
+  const active   = allProjects.filter((p) => p.status !== "archived");
+  const archived = allProjects.filter((p) => p.status === "archived");
+  const activeCount = active.filter((p) => p.status === "active").length;
+  const syncedCount = active.filter((p) => p.current_phase >= 7).length;
+
+  function renderRow(project: typeof allProjects[number], isArch: boolean) {
+    const route = phaseRoute(project.current_phase);
+    return (
+      <div key={project.id} className="relative group flex items-center">
+        <Link href={`/projects/${project.id}/${route}`} className="flex-1 min-w-0">
+          <ProjectCard
+            id={project.id}
+            name={project.name}
+            domain={project.domain ?? ""}
+            phase={route}
+            updated={timeAgo(project.updated_at)}
+            className={isArch ? "opacity-50" : undefined}
+          />
+        </Link>
+        <div className="absolute right-3 top-1/2 -translate-y-1/2">
+          <ThreeDotsMenu
+            projectId={project.id}
+            isArchived={isArch}
+            onArchive={(id) => archive.mutate(id)}
+            onUnarchive={(id) => unarchive.mutate(id)}
+          />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="px-6 py-8 max-w-5xl mx-auto flex flex-col gap-6">
@@ -61,12 +161,12 @@ export default function DashboardPage() {
 
       {/* Stats row */}
       <div className="grid grid-cols-3 gap-3">
-        <MetricsStatCard label="Total Projects"   value={totalCount} />
+        <MetricsStatCard label="Total Projects"   value={active.length} />
         <MetricsStatCard label="In Progress"      value={activeCount} />
         <MetricsStatCard label="Synced to GitHub" value={syncedCount} />
       </div>
 
-      {/* Project list */}
+      {/* Active projects */}
       <div className="bg-card border border-border rounded-xl overflow-hidden">
         <div className="flex items-center justify-between px-4 py-3 border-b border-border">
           <span className="text-xs font-semibold uppercase tracking-wide text-text-muted">Projects</span>
@@ -81,7 +181,7 @@ export default function DashboardPage() {
           </Link>
         </div>
 
-        {projects.length === 0 ? (
+        {active.length === 0 ? (
           <EmptyState
             title="No projects yet"
             description="Upload a requirements document to get started."
@@ -104,30 +204,32 @@ export default function DashboardPage() {
             }
           />
         ) : (
-          <div>
-            {projects.map((project) => (
-              <Link
-                key={project.id}
-                href={`/projects/${project.id}/${phaseRoute(project.current_phase)}`}
-                className="block"
-              >
-                <ProjectCard
-                  id={project.id}
-                  name={project.name}
-                  domain={project.domain ?? ""}
-                  phase={phaseRoute(project.current_phase)}
-                  updated={timeAgo(project.updated_at)}
-                  techPreview={project.tech_preview}
-                  totalWeeks={project.total_weeks}
-                  teamSize={project.team_size}
-                  moduleCount={project.module_count}
-                  milestonesUrl={project.milestones_url}
-                />
-              </Link>
-            ))}
-          </div>
+          <div>{active.map((p) => renderRow(p, false))}</div>
         )}
       </div>
+
+      {/* Archived projects */}
+      {archived.length > 0 && (
+        <div className="bg-card border border-border rounded-xl overflow-hidden">
+          <button
+            onClick={() => setShowArchived((v) => !v)}
+            className="w-full flex items-center justify-between px-4 py-3 border-b border-border hover:bg-surface-subtle transition-colors"
+          >
+            <span className="text-xs font-semibold uppercase tracking-wide text-text-muted">
+              Archived ({archived.length})
+            </span>
+            <svg
+              className={cn("w-3 h-3 text-text-muted transition-transform", showArchived && "rotate-180")}
+              fill="none" viewBox="0 0 12 12" stroke="currentColor" strokeWidth={2}
+            >
+              <path d="M2 4l4 4 4-4" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+          {showArchived && (
+            <div>{archived.map((p) => renderRow(p, true))}</div>
+          )}
+        </div>
+      )}
 
     </div>
   );
