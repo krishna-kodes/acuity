@@ -181,11 +181,15 @@ def estimate_effort(proposal_summary: str, team_size: int, reference_projects: l
     """Estimate effort in weeks and story points given team and historical data."""
     from app.schemas.project import EpicsOutput
 
+    class _BreakdownItem(BaseModel):
+        phase: str
+        points: int
+
     class _EffortEstimate(BaseModel):
         total_weeks: int
         total_points: int
         confidence: float
-        breakdown: dict[str, int]
+        breakdown: list[_BreakdownItem]
         reasoning: str
 
     llm = get_llm(fast=True).with_structured_output(_EffortEstimate)
@@ -202,9 +206,11 @@ def estimate_effort(proposal_summary: str, team_size: int, reference_projects: l
         f"Team size: {team_size}\n\n"
         f"Reference projects:\n{refs}\n\n"
         "Return total_weeks (int), total_points (int), confidence (0.0-1.0), "
-        "breakdown as dict of phase_name->points, and reasoning."
+        "breakdown as list of {phase, points} objects, and reasoning."
     )
-    return result.model_dump()
+    data = result.model_dump()
+    data["breakdown"] = {item["phase"]: item["points"] for item in data["breakdown"]}
+    return data
 
 
 _EPIC_GENERATION_PROMPT = (
