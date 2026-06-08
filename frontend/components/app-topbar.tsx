@@ -57,18 +57,6 @@ export function AppTopbar({ onMenuClick, className }: AppTopbarProps) {
         <h1 className="text-sm font-semibold text-foreground">{title}</h1>
       </div>
 
-      <Link
-        href="/projects/new"
-        className={cn(
-          "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium",
-          "bg-primary text-primary-foreground hover:bg-accent-hover transition-colors"
-        )}
-      >
-        <svg className="w-3 h-3" fill="none" viewBox="0 0 12 12" stroke="currentColor" strokeWidth={2.5}>
-          <path d="M6 2v8M2 6h8" strokeLinecap="round" />
-        </svg>
-        New Project
-      </Link>
     </header>
   );
 }
