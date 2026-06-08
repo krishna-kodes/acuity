@@ -30,6 +30,16 @@ class ProjectResponse(BaseModel):
     created_at: str
 
 
+class ProjectDetailResponse(BaseModel):
+    id: str
+    name: str
+    domain: str | None
+    status: str
+    current_phase: int
+    created_at: str
+    summary: str | None = None
+
+
 class TBDItem(BaseModel):
     id: str
     question: str
