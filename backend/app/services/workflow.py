@@ -190,7 +190,10 @@ def estimate_effort(proposal_summary: str, team_size: int, reference_projects: l
 
     llm = get_llm(fast=True).with_structured_output(_EffortEstimate)
     refs = "\n".join(
-        f"- {p['name']}: {p['duration_weeks']}w, {p['team_size']} devs, {p['estimated_points']} pts"
+        f"- {p.get('name', p.get('project_name', 'Unknown'))}: "
+        f"{p.get('duration_weeks', '?')}w, "
+        f"{p.get('team_size', '?')} devs, "
+        f"{p.get('estimated_points', '?')} pts"
         for p in reference_projects[:5]
     ) or "No reference projects available."
 
