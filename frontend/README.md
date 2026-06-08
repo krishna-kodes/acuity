@@ -1,36 +1,77 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Acuity — Frontend
 
-## Getting Started
+Next.js 16.2 App Router frontend for the Acuity AI-driven PM tool.
 
-First, run the development server:
+> **Read the root [`../README.md`](../README.md) first** — it covers full setup, prerequisites, and the Make targets you'll use daily.
+
+---
+
+## Dev server
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm run dev      # http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Requires the backend running at `http://localhost:8000` (see root README).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+---
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Key commands
 
-## Learn More
+```bash
+npm run dev          # dev server with hot reload
+npm run build        # production build
+npm run lint         # ESLint
+npx tsc --noEmit     # TypeScript type check
+```
 
-To learn more about Next.js, take a look at the following resources:
+---
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Project structure
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```
+frontend/
+├── app/
+│   ├── (app)/
+│   │   └── projects/[id]/    One directory per phase:
+│   │       ├── redaction/    Phase 1 — PII review
+│   │       ├── chat/         Phase 2 — RAG chat + proposal
+│   │       ├── modules/      Phase 3 — Extract work modules
+│   │       ├── techstack/    Phase 4 — Tech stack suggestion
+│   │       ├── team/         Phase 5 — Team suggestion
+│   │       ├── estimation/   Phase 6 — Effort estimation
+│   │       └── epics/        Phase 7 — Epic + task gen + GitHub sync
+│   └── layout.tsx
+├── components/
+│   ├── phase-progress-stepper.tsx
+│   ├── redaction-highlight.tsx
+│   └── ...
+└── lib/
+    ├── api.ts              fetch wrapper, all API calls
+    ├── api.types.ts        shared TypeScript types
+    ├── project-phases.ts   phase ordering + route helpers
+    └── utils.ts
+```
 
-## Deploy on Vercel
+---
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Tech stack
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+| | |
+|--|--|
+| Framework | Next.js 16.2, App Router |
+| Styling | Tailwind CSS v4 (`@theme` tokens in `globals.css`) |
+| Components | shadcn/ui |
+| Charts | Recharts (metrics page only) |
+| Toasts | sonner |
+| Data fetching | TanStack Query (`@tanstack/react-query`) |
+| Type checking | TypeScript strict |
+
+---
+
+## Conventions
+
+- All API calls go through `lib/api.ts` — never `fetch` directly from a page
+- Phase pages use `use(params)` for async route params (Next.js 15+)
+- Tailwind v4 uses `@theme` — no `tailwind.config.js`; design tokens live in `globals.css`
+- Design token reference: `../DESIGN_HANDOFF.md`

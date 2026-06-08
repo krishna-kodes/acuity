@@ -49,7 +49,7 @@ Phase advancement uses dedicated `approve` endpoints rather than `POST /phases/{
 | modules → techstack | `POST /projects/{id}/modules/approve` |
 | techstack → team | Frontend navigates directly (stack runs synchronously) |
 | team → estimation | Frontend navigates after `PUT /projects/{id}/team` |
-| estimation → epics | Frontend navigates after estimation renders |
+| estimation → epics | Frontend navigates after estimation renders; backend 409s if phase_5 not complete |
 
 Backend enforces ordering via `_POST_*_PHASES` sets — returns HTTP 409 if prior phase incomplete.
 
