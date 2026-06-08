@@ -10,7 +10,7 @@ import { cn } from "@/lib/utils";
 export function AppShell({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const pathname = usePathname();
-  const projectId = pathname.match(/\/projects\/([^/]+)/)?.[1];
+  const projectId = pathname.match(/\/projects\/(\d+)/)?.[1];
 
   // Close sidebar on route change (mobile nav)
   useEffect(() => {
