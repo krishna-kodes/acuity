@@ -53,6 +53,7 @@ export default function ModulesPage({ params }: { params: Promise<{ id: string }
   const [newLabel, setNewLabel] = useState<Label>("backend");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
+  const [isDirty, setIsDirty] = useState(false);
   // Prevents React StrictMode double-fire from triggering two LLM extraction calls
   const extractionFiredRef = useRef(false);
 
@@ -63,6 +64,7 @@ export default function ModulesPage({ params }: { params: Promise<{ id: string }
       const data = await extractModules(id);
       if (isCancelled?.()) { toast.dismiss(tid); return; }
       setModules(data.modules);
+      setIsDirty(false);
       toast.dismiss(tid);
       toast.success(
         data.modules.length > 0
@@ -88,6 +90,7 @@ export default function ModulesPage({ params }: { params: Promise<{ id: string }
         if (cancelled) return;
         if (data.modules.length > 0) {
           setModules(data.modules);
+          setIsDirty(false);
           return;
         }
       } catch {
@@ -113,10 +116,12 @@ export default function ModulesPage({ params }: { params: Promise<{ id: string }
     };
     setModules((prev) => [...prev, m]);
     setNewTitle("");
+    setIsDirty(true);
   }
 
   function deleteModule(moduleId: string) {
     setModules((prev) => prev.filter((m) => m.id !== moduleId));
+    setIsDirty(true);
   }
 
   function startEdit(m: Module) {
@@ -129,12 +134,14 @@ export default function ModulesPage({ params }: { params: Promise<{ id: string }
       prev.map((m) => (m.id === moduleId ? { ...m, title: editingTitle } : m))
     );
     setEditingId(null);
+    setIsDirty(true);
   }
 
   async function handleSave() {
     setSaving(true);
     try {
       await saveModules(id, modules);
+      setIsDirty(false);
       toast.success("Changes saved");
     } catch {
       toast.error("Save failed");
@@ -147,6 +154,7 @@ export default function ModulesPage({ params }: { params: Promise<{ id: string }
     setApproving(true);
     try {
       await saveModules(id, modules);
+      setIsDirty(false);
       await approveModules(id);
       router.push(getNextPhaseRoute("modules", id));
     } catch {
@@ -169,7 +177,14 @@ export default function ModulesPage({ params }: { params: Promise<{ id: string }
         {/* Header */}
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div>
-            <h2 className="text-base font-semibold text-foreground">Work Modules</h2>
+            <div className="flex items-center gap-2">
+              <h2 className="text-base font-semibold text-foreground">Work Modules</h2>
+              {saving && <span className="text-xs text-text-muted">Saving…</span>}
+              {!saving && isDirty && <span className="text-xs text-amber-600">Unsaved changes</span>}
+              {!saving && !isDirty && modules.length > 0 && !extracting && (
+                <span className="text-xs text-green-600">Saved</span>
+              )}
+            </div>
             <p className="text-xs text-text-muted mt-0.5">
               Review AI-extracted work packages. Add, edit, or remove items before proceeding.
             </p>
