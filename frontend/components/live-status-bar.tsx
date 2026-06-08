@@ -1,6 +1,8 @@
 "use client";
 
+import { useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { usePathname } from "next/navigation";
 import { getLiveStatus } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -24,12 +26,24 @@ function fmtNode(node: string): string {
 }
 
 export function LiveStatusBar({ projectId, className }: LiveStatusBarProps) {
-  const { data } = useQuery({
+  const pathname = usePathname();
+
+  const { data, refetch } = useQuery({
     queryKey: ["live-status", projectId],
     queryFn: () => getLiveStatus(projectId),
-    refetchInterval: 5_000,
+    refetchInterval: (query) => {
+      const d = query.state.data;
+      if (!d) return 3_000;
+      return d.is_recent ? 2_000 : 15_000;
+    },
     staleTime: 0,
+    refetchOnWindowFocus: true,
   });
+
+  // Immediate refetch on phase navigation (after "Proceed" click)
+  useEffect(() => {
+    refetch();
+  }, [pathname]);
 
   const tokenPct = data
     ? Math.min((data.total_tokens / (data.token_budget || 100_000)) * 100, 100)
