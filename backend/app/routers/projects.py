@@ -1025,6 +1025,12 @@ async def suggest_team(
             detail="Phase 3 (tech stack suggestion) must be complete before running team suggestion",
         )
 
+    # Return cached result if team already ran — prevents re-running LLM on phase revisit
+    cached = project.team_suggestion or {}
+    if cached and project.phase in _POST_TEAM_PHASES:
+        members = cached.get("members", [])
+        return TeamResponse(members=members, total=len(members))
+
     team: dict = {}
     try:
         from app.services.workflow import run_phase
