@@ -66,7 +66,7 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
   const [approving, setApproving] = useState(false);
   const [proposalError, setProposalError] = useState<string | null>(null);
 
-  const { data: remoteTbds } = useQuery({
+  const { data: remoteTbds, isPending: tbdsPending, isError: tbdsError, refetch: refetchTbds } = useQuery({
     queryKey: ["tbds", projectId],
     queryFn: async () => {
       const { data, error } = await getTBDs(projectId);
@@ -89,7 +89,7 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
   }));
 
   const outstandingTbds = tbdItems.filter((t) => t.status === "open").length;
-  const allTbdsResolved = tbdItems.length === 0 || outstandingTbds === 0;
+  const allTbdsResolved = !tbdsPending && (tbdItems.length === 0 || outstandingTbds === 0);
 
   // Update welcome message once TBD count is known
   useEffect(() => {
@@ -507,7 +507,25 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
               </div>
 
               <div className="flex-1 overflow-y-auto px-4 py-4">
-                <TBDClarificationWidget items={tbdItems} onAction={handleTBDAction} onBulkAction={handleBulkTBDAction} />
+                {tbdsPending ? (
+                  <div className="flex flex-col gap-2">
+                    {[1, 2, 3].map((i) => (
+                      <div key={i} className="h-14 rounded-md bg-surface-subtle animate-pulse" />
+                    ))}
+                  </div>
+                ) : tbdsError ? (
+                  <div className="flex flex-col items-center py-8 gap-3 text-center">
+                    <p className="text-xs text-destructive">Failed to load TBD items.</p>
+                    <button
+                      onClick={() => refetchTbds()}
+                      className="px-3 py-1.5 rounded-md text-xs font-medium border border-border text-foreground hover:bg-surface-subtle transition-colors"
+                    >
+                      Retry
+                    </button>
+                  </div>
+                ) : (
+                  <TBDClarificationWidget items={tbdItems} onAction={handleTBDAction} onBulkAction={handleBulkTBDAction} />
+                )}
               </div>
 
               {/* Generate Proposal */}
