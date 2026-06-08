@@ -205,10 +205,20 @@ function ProjectSwitcher({ currentProjectId }: { currentProjectId: string }) {
     <div className="relative px-2 mb-1">
       <button
         onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center justify-between gap-2 px-3 py-2 rounded-md text-sm hover:bg-sidebar-hover transition-colors"
+        className="w-full flex items-center gap-2.5 px-3 py-2 rounded-md hover:bg-sidebar-hover transition-colors"
       >
-        <span className="truncate font-medium text-foreground text-sm">{displayName}</span>
-        <span className="text-[10px] text-text-muted whitespace-nowrap shrink-0">Switch project</span>
+        {/* Project icon tile */}
+        <div className="w-7 h-7 rounded-md bg-primary/15 flex items-center justify-center shrink-0">
+          <svg className="w-4 h-4 text-primary" fill="none" viewBox="0 0 16 16" stroke="currentColor" strokeWidth={1.75}>
+            <path d="M2 5.5A1.5 1.5 0 0 1 3.5 4h3l1.5 1.5H12.5A1.5 1.5 0 0 1 14 7v5a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 12V5.5z" />
+          </svg>
+        </div>
+        {/* Text */}
+        <div className="flex-1 min-w-0 text-left">
+          <div className="text-sm font-medium text-foreground truncate">{displayName}</div>
+          <div className="text-[11px] text-text-muted">Switch project</div>
+        </div>
+        {/* Chevron */}
         <svg
           className={cn("w-3 h-3 text-text-muted shrink-0 transition-transform", open && "rotate-180")}
           fill="none" viewBox="0 0 12 12" stroke="currentColor" strokeWidth={2}
