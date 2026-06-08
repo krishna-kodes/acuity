@@ -15,6 +15,10 @@ class SyncProvider(str, Enum):
     jira = "jira"
 
 
+class SyncRequest(BaseModel):
+    epic_ids: list[int] | None = None  # None = sync all; list = sync only these IDs
+
+
 class SyncConfigRequest(BaseModel):
     provider: SyncProvider | None = None
     github_repo: str | None = None

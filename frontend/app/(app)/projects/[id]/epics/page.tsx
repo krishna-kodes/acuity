@@ -266,7 +266,12 @@ export default function EpicsPage({ params }: { params: Promise<{ id: string }> 
 
     try {
       const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-      const res = await fetch(`${apiBase}/api/v1/projects/${id}/sync`, { method: "POST" });
+      const selectedIds = epics.filter((e) => e.selected).map((e) => Number(e.id));
+      const res = await fetch(`${apiBase}/api/v1/projects/${id}/sync`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ epic_ids: selectedIds }),
+      });
       if (!res.ok) throw new Error(`Sync failed: ${res.status}`);
 
       const syncData = await res.json();
