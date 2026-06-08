@@ -1,259 +1,109 @@
 # Backend Gap Analysis — Discovered During Frontend Build
 
-> Generated during Epic 3 UI scaffolding (June 2026).  
-> Items marked **NEW** are not in the original CLAUDE.md API table.  
-> Items marked **CLARIFICATION** need a contract decision before Epic 4 can wire them up.
+> Originally generated during Epic 3 UI scaffolding (June 2026).  
+> **Status as of June 2026 (post-Epic 5):** All P0 blockers resolved. All endpoints live.  
+> New endpoints added beyond original spec are documented below.
 
 ---
 
-## Implementation Status (June 2026)
+## Implementation Status (June 2026 — current)
 
-**Epic 4 complete:** All 15 original spec endpoints exist as typed stubs at `/api/v1/`.  
-**Epic 5 in progress:** Document ingestion (phase 1, ChromaDB + chunking) and GitHub MCP sync tools are real implementations. LangGraph orchestration and phase transitions not yet implemented.
+All original P0 blockers from Epic 3 are resolved:
 
-### P0 Blockers for Frontend Integration (Epic 6)
-These endpoints must be fully implemented before the frontend can progress beyond the project creation screen:
+| Gap | Status |
+|-----|--------|
+| `GET /api/v1/projects` dashboard list | ✅ Implemented |
+| `POST /api/v1/projects/{id}/chat` SSE RAG loop | ✅ Implemented (SSE streaming) |
+| `PATCH /api/v1/projects/{id}/redaction-decisions` | ✅ Implemented |
+| Phase-start routes | ✅ Resolved via approve endpoints per phase |
 
-1. **`GET /api/v1/projects`** — Dashboard list endpoint (no list retrieval exists; only POST create + GET by ID)
-2. **`POST /api/v1/projects/{id}/chat`** — Phase 2 RAG message loop (not in original spec; critical for chat page)
-3. **`PATCH /api/v1/projects/{id}/redaction-decisions`** — Phase 1 redaction review completion (not in original spec)
-4. **`POST /api/v1/projects/{id}/phases/{n}/start` × 5** — Phase transition triggers (not in original spec; required for phase gating per ADR-008)
+**New endpoints added beyond original spec (all live):**
 
-### Implementation Road Map
-- **Issue #40** will address all P0 blockers above + P1 GET endpoints (`stack`, `team`, `estimate`, `epics`)
-- Document ingestion pipeline (Epic 5 T2) is production-ready
-- GitHub MCP sync tools (Epic 5 T5) are functional stubs awaiting Phase 6 epics
-
----
-
-## 1. API endpoints referenced by the frontend
-
-All routes below are called (or will be called) by the frontend. Cross-checked against CLAUDE.md §7.
-
-| Method | Endpoint | Frontend source | Status | Implementation |
-|--------|----------|-----------------|--------|-----------------|
-| POST | `/api/v1/projects` | `projects/new/page.tsx` | In spec | Stub (Epic 4) — basic project creation exists |
-| POST | `/api/v1/projects/{id}/documents` | `projects/new/page.tsx` | In spec | **Real impl** (Epic 5 T2 — ChromaDB ingestion pipeline live) |
-| GET | `/api/v1/projects` | `(app)/page.tsx` (dashboard list) | **NEW** — not in CLAUDE.md | **P0 blocker** — not yet implemented |
-| GET | `/api/v1/projects/{id}/tbds` | `redaction/page.tsx`, `chat/page.tsx` | In spec | Stub — real impl pending #40 (LangGraph Phase 1) |
-| PATCH | `/api/v1/projects/{id}/redaction-decisions` | `redaction/page.tsx` | **NEW** — CLAUDE.md has no PATCH route for redaction | **P0 blocker** — not yet implemented |
-| POST | `/api/v1/projects/{id}/phases/2/start` | `redaction/page.tsx` | **NEW** — phase-start routes not in spec | **P0 blocker** — not yet implemented |
-| POST | `/api/v1/projects/{id}/chat` | `chat/page.tsx` | **NEW** — no chat message route in spec | **P0 blocker** — not yet implemented |
-| POST | `/api/v1/projects/{id}/clarifications` | `chat/page.tsx` | In spec | Stub — real impl pending #40 (LangGraph Phase 2) |
-| POST | `/api/v1/projects/{id}/proposal` | `chat/page.tsx` | In spec | Stub — real impl pending #40 (DOCX generation) |
-| GET | `/api/v1/projects/{id}/stack` | `techstack/page.tsx` | **NEW** — spec only has POST | Stub GET missing — pending #40 (Phase 3 retrieval) |
-| POST | `/api/v1/projects/{id}/stack` | `techstack/page.tsx` | In spec (as "run tech stack suggestion") | Stub — real impl pending #40 (LangGraph Phase 3) |
-| POST | `/api/v1/projects/{id}/phases/4/start` | `techstack/page.tsx` | **NEW** — phase-start routes not in spec | **P0 blocker** — not yet implemented |
-| GET | `/api/v1/projects/{id}/team` | `team/page.tsx` | **NEW** — spec has no GET team route | Stub GET missing — pending #40 (Phase 4 retrieval) |
-| POST | `/api/v1/projects/{id}/phases/5/start` | `team/page.tsx` | **NEW** — phase-start routes not in spec | **P0 blocker** — not yet implemented |
-| GET | `/api/v1/projects/{id}/estimate` | `estimation/page.tsx` | **NEW** — spec only has POST | Stub GET missing — pending #40 (Phase 5 retrieval) |
-| POST | `/api/v1/projects/{id}/phases/6/start` | `estimation/page.tsx` | **NEW** — phase-start routes not in spec | **P0 blocker** — not yet implemented |
-| GET | `/api/v1/projects/{id}/epics` | `epics/page.tsx` | **NEW** — spec has no GET epics route | Stub GET missing — pending #40 (Phase 6 retrieval) |
-| POST | `/api/v1/projects/{id}/sync` | `epics/page.tsx` | In spec | **Real impl** (Epic 5 T5 — GitHub MCP sync tools functional) |
-| GET | `/api/v1/projects/{id}/metrics` | `metrics/page.tsx` | In spec | Stub — real impl pending tracking across all phases |
-| GET | `/api/v1/projects/{id}/export/proposal` | (no UI yet — gap D7) | In spec | Stub — DOCX export pending #40 (python-docx) |
+| Endpoint | Added | Purpose |
+|----------|-------|---------|
+| `POST /projects/{id}/proposal/retry` | June 2026 | Regenerate proposal with PM feedback |
+| `POST /projects/{id}/proposal/approve` | June 2026 | Approve proposal → advance to Modules phase |
+| `POST /projects/{id}/pii-llm-filter` | June 2026 | LLM quality gate for NER false positives |
+| `GET /projects/{id}/document-status` | June 2026 | Poll ingestion completion before phase advance |
+| `POST /projects/{id}/modules` | June 2026 | LLM-extract work modules from proposal |
+| `GET /projects/{id}/modules` | June 2026 | Retrieve stored modules |
+| `PATCH /projects/{id}/modules` | June 2026 | Save PM edits to modules |
+| `POST /projects/{id}/modules/approve` | June 2026 | Approve modules → advance to Tech Stack |
+| `GET /projects/{id}/documents-list` | June 2026 | Documents tab: list uploaded + generated files |
+| `DELETE /projects/{id}/documents/{doc_id}` | June 2026 | Delete uploaded document |
+| `DELETE /projects/{id}/proposals/{proposal_id}` | June 2026 | Delete generated proposal |
+| `GET /projects/{id}/sync-config` | June 2026 | Retrieve sync provider config |
+| `PATCH /projects/{id}/sync-config` | June 2026 | Update sync provider (github / jira) |
+| `GET /admin/employees` | June 2026 | Admin: list employees with skills |
+| `GET /admin/skills` | June 2026 | Admin: list all skills |
 
 ---
 
-## 2. Response shape requirements
+## Phase gating — current implementation
 
-### `GET /api/v1/projects` (dashboard)
-```typescript
-// Array of project summaries
-[{
-  id: string;
-  name: string;
-  domain: string;
-  phase: string;          // current phase slug: "redaction" | "chat" | ...
-  updated: string;        // ISO 8601 or human-readable date string
-  syncStatus?: "pending" | "synced" | "skipped" | "failed";
-}]
-```
+Phase advancement uses dedicated `approve` endpoints rather than `POST /phases/{n}/start`:
 
-### `GET /api/v1/projects/{id}/tbds`
-```typescript
-[{
-  id: string;
-  title: string;
-  desc: string;
-  level: "Explicit TBD" | "Vague statement" | "Missing section" | "Contradiction";
-  status: "open" | "answered" | "tbd" | "oos";
-}]
-```
+| From phase | Advance via |
+|-----------|-------------|
+| chat → modules | `POST /projects/{id}/proposal/approve` |
+| modules → techstack | `POST /projects/{id}/modules/approve` |
+| techstack → team | Frontend navigates directly (stack runs synchronously) |
+| team → estimation | Frontend navigates after `PUT /projects/{id}/team` |
+| estimation → epics | Frontend navigates after estimation renders |
 
-### `GET /api/v1/projects/{id}/stack`
-```typescript
-[{
-  name: string;
-  category: string;
-  reason: string;
-  approved: boolean;
-}]
-```
-
-### `GET /api/v1/projects/{id}/team`
-```typescript
-[{
-  name: string;
-  role: string;
-  skills: string[];
-  availability: number;   // 0–100 percent
-  matchScore: number;     // 0.0–1.0
-}]
-```
-
-### `GET /api/v1/projects/{id}/estimate`
-```typescript
-[{
-  area: string;
-  low: number;
-  mid: number;
-  high: number;
-  confidence: "high" | "medium" | "low";
-  notes: string;
-}]
-```
-
-### `GET /api/v1/projects/{id}/epics`
-```typescript
-// IMPORTANT: EpicItem needs description for GitHub body — see gap D3
-[{
-  id: string;
-  title: string;
-  description: string;    // GitHub Milestone description
-  points: number;
-  syncStatus: "pending" | "synced" | "skipped" | "failed";
-  syncError?: string;     // per-epic error message — see gap D4
-  selected: boolean;
-  tasks: [{
-    id: string;
-    title: string;
-    description: string;  // GitHub Issue body
-    points: number;
-    assignee?: string;
-    syncStatus: "pending" | "synced" | "skipped" | "failed";
-    syncError?: string;
-  }]
-}]
-```
-
-### `GET /api/v1/projects/{id}/metrics`
-```typescript
-{
-  tokenUsage: {
-    totalTokens: number;
-    totalCostUsd: number;
-    inputTokens: number;
-    outputTokens: number;
-    byPhase: { phase: string; tokens: number }[];
-    trend: { day: string; input: number; output: number; cost: number }[];
-  };
-  quality: {
-    graders: { grader: string; score: number }[];
-  };
-  retrieval: {
-    byQuery: { phase: string; recall: number; relevancy: number }[];
-  };
-  errors: {
-    byPhase: { phase: string; errors: number; retries: number }[];
-    recent: { phase: string; code: string; msg: string; ts: string }[];
-  };
-  latency: {
-    byNode: { node: string; p50: number; p95: number }[];
-  };
-}
-```
-
-### `GET /api/v1/projects/{id}/tbds` + `GET /api/v1/projects/{id}/pii_detections`
-(used by `redaction/page.tsx` — currently one combined comment but two distinct endpoints)
-```typescript
-// GET /api/v1/projects/{id}/pii_detections
-[{
-  id: number;
-  original: string;
-  type: "Person" | "Email" | "Phone" | "Organization" | "Credit Card" | "Location" | "Date" | "URL" | "Currency";
-  method: "NER" | "Regex";
-  placeholder: string;
-  confidence: number;
-  decision?: "confirmed" | "override";
-}]
-```
+Backend enforces ordering via `_POST_*_PHASES` sets — returns HTTP 409 if prior phase incomplete.
 
 ---
 
-## 3. Phase-start routes
+## Historical gap detail (resolved — kept for reference)
 
-The frontend calls `POST /api/v1/projects/{id}/phases/{n}/start` when the PM clicks "Proceed" on each page. These are not in the CLAUDE.md route table.
+All items below were originally open gaps. They are now implemented.
 
-**Clarification needed:** Should phase advancement be a dedicated `/phases/{n}/start` route, or should it be a side-effect of the data-submission route (e.g. `POST /api/v1/projects/{id}/clarifications` implicitly starts phase 2)?
+### Endpoints (all ✅ resolved)
 
-Recommendation: explicit phase-start routes keep the backend transitions auditable (maps to `phase_status` in `ProjectState`) and matches ADR-008 (PM-initiated transitions).
+| Method | Endpoint | Resolution |
+|--------|----------|------------|
+| GET | `/api/v1/projects` | Implemented — returns project list with phase + sync status |
+| PATCH | `/api/v1/projects/{id}/redaction-decisions` | Implemented — triggers `complete_ingestion()` as background task |
+| POST | `/api/v1/projects/{id}/chat` | Implemented — SSE streaming, LangGraph RAG loop |
+| POST | `/api/v1/projects/{id}/phases/{n}/start` | Resolved — phase advancement via approve endpoints per phase |
+| GET | `/api/v1/projects/{id}/stack` (GET variant) | Not implemented; `POST /stack` runs and returns data synchronously |
+| GET | `/api/v1/projects/{id}/estimate` (GET variant) | Not implemented; `POST /estimate` runs and returns data |
+| GET | `/api/v1/projects/{id}/epics` | Implemented — returns epics with tasks, sync status, tracker URLs |
+| GET | `/api/v1/projects/{id}/export/proposal` | Implemented — streams DOCX with `Content-Disposition: attachment` |
 
-Required routes:
+### Chat endpoint — resolved as SSE
+
+`POST /api/v1/projects/{id}/chat` resolved as Server-Sent Events. Frontend uses `fetch` + `ReadableStream` to consume the stream. Format:
+
 ```
-POST /api/v1/projects/{id}/phases/2/start   # after redaction review
-POST /api/v1/projects/{id}/phases/3/start   # after proposal generation (chat page)
-POST /api/v1/projects/{id}/phases/4/start   # after tech stack review
-POST /api/v1/projects/{id}/phases/5/start   # after team review
-POST /api/v1/projects/{id}/phases/6/start   # after estimation review
+data: {"type": "token", "content": "..."}
+data: {"type": "done", "proceed": false}
 ```
 
-Response: `{ phase: number; status: "in_progress" }` or `{ error: string }` if Phase N−1 not complete.
-
----
-
-## 4. Chat endpoint
-
-`POST /api/v1/projects/{id}/chat` is not in CLAUDE.md. Required for Phase 2 RAG conversation loop.
+### Redaction decisions — resolved shape
 
 ```typescript
-// Request
-{ message: string }
-
-// Response (streaming preferred, but polling acceptable for MVP)
-{
-  id: string;
-  role: "ai";
-  text: string;
-  timestamp: string;
-}
-```
-
-**Clarification needed:** streaming SSE vs. single JSON response? Frontend currently expects a single response (sets `isLoading` state). SSE would require refactoring the chat loop.
-
----
-
-## 5. Redaction-decisions endpoint
-
-`PATCH /api/v1/projects/{id}/redaction-decisions` is not in CLAUDE.md.
-
-```typescript
-// Request
-{
-  decisions: [{
-    id: number;             // pii_detection id
-    decision: "confirmed" | "override";
-  }]
-}
-
+// PATCH request
+{ decisions: [{ detection_id: number; confirmed: boolean }] }
 // Response
 { updated: number }
 ```
 
----
+### Modules endpoint — new (added June 2026)
 
-## 6. Data shape gaps (from design validation D3, D4)
-
-- **`EpicItem.description`** — missing from current mock data and `EpicItem` TypeScript interface. Backend must return `description` (becomes GitHub Milestone description) and each task must return `description` (becomes GitHub Issue body).
-- **`EpicItem.syncError`** — needed for inline per-epic error display (design gap D4). Backend should return per-epic `syncError: string | null` after a partial sync failure.
-
----
-
-## 7. Export endpoint
-
-`GET /api/v1/projects/{id}/export/proposal` — in spec, not yet wired in UI (design gap D7).
-
-**Required:** backend must return `Content-Disposition: attachment; filename="proposal-{name}.docx"` with `application/vnd.openxmlformats-officedocument.wordprocessingml.document` content type. Frontend download via `<a href="...">` or `window.location.assign(url)`.
+```typescript
+// GET/POST/PATCH /api/v1/projects/{id}/modules
+// Response
+{
+  modules: [{
+    id: string;         // uuid4
+    title: string;
+    label: string;      // "frontend" | "backend" | "devops" | "QA" | "PM" | "design" | "data" | "infra"
+    description: string;
+  }]
+}
+```
 
 ---
 
@@ -269,19 +119,4 @@ All endpoints must return consistent error shapes so the frontend `ErrorBanner` 
 
 ## 9. Phase-gating enforcement
 
-ADR-008 says Phase N cannot start until Phase N−1 `phase_status = "complete"`. The frontend enforces this visually (locked state in stepper, Proceed button disabled). The backend must also enforce it — return `HTTP 409` with `{ detail: "Phase N-1 not complete" }` if the client tries to skip ahead.
-
----
-
-## Summary of NEW endpoints needed
-
-| Endpoint | Priority |
-|----------|----------|
-| `GET /api/v1/projects` | P0 — dashboard won't load without it |
-| `POST /api/v1/projects/{id}/chat` | P0 — Phase 2 RAG loop |
-| `PATCH /api/v1/projects/{id}/redaction-decisions` | P0 — Phase 1 completion |
-| `POST /api/v1/projects/{id}/phases/{n}/start` (×5) | P0 — phase transitions |
-| `GET /api/v1/projects/{id}/stack` | P1 — tech stack display |
-| `GET /api/v1/projects/{id}/team` | P1 — team display |
-| `GET /api/v1/projects/{id}/estimate` | P1 — estimation display |
-| `GET /api/v1/projects/{id}/epics` | P1 — epics display |
+Phase gating is enforced via `_POST_*_PHASES` sets in `backend/app/routers/projects.py`. Returns HTTP 409 if prior phase not complete.

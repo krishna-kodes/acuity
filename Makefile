@@ -5,8 +5,9 @@
 	build lint test \
 	lint-fe lint-be \
 	test-be typecheck-fe typecheck-be \
-	db-migrate db-upgrade db-reset seed \
-	evals \
+	db-migrate db-upgrade db-reset seed seed-reset \
+	modules-extract modules-approve pii-filter \
+	evals evals-baseline \
 	clean
 
 VENV := backend/.venv
@@ -109,6 +110,28 @@ seed: ## Seed all factory data via API (backend must be running)
 seed-reset: ## Reset DB then reseed
 	curl -s -X DELETE http://localhost:8000/api/v1/factory/reset-db | python3 -m json.tool
 	curl -s -X POST  http://localhost:8000/api/v1/factory/seed-all  | python3 -m json.tool
+
+# ── project phase helpers (backend must be running) ───────────────────────────
+
+modules-extract: ## LLM-extract work modules from proposal (ID=<project_id>)
+	@[ -n "$(ID)" ] || (echo "Usage: make modules-extract ID=<project_id>" && exit 1)
+	curl -s -X POST http://localhost:8000/api/v1/projects/$(ID)/modules | python3 -m json.tool
+
+modules-approve: ## Approve modules and advance phase to techstack (ID=<project_id>)
+	@[ -n "$(ID)" ] || (echo "Usage: make modules-approve ID=<project_id>" && exit 1)
+	curl -s -X POST http://localhost:8000/api/v1/projects/$(ID)/modules/approve | python3 -m json.tool
+
+pii-filter: ## Run LLM quality filter on NER PII detections (ID=<project_id>)
+	@[ -n "$(ID)" ] || (echo "Usage: make pii-filter ID=<project_id>" && exit 1)
+	curl -s -X POST http://localhost:8000/api/v1/projects/$(ID)/pii-llm-filter | python3 -m json.tool
+
+proposal-approve: ## Approve proposal and advance phase to modules (ID=<project_id>)
+	@[ -n "$(ID)" ] || (echo "Usage: make proposal-approve ID=<project_id>" && exit 1)
+	curl -s -X POST http://localhost:8000/api/v1/projects/$(ID)/proposal/approve | python3 -m json.tool
+
+doc-status: ## Poll document ingestion status (ID=<project_id>)
+	@[ -n "$(ID)" ] || (echo "Usage: make doc-status ID=<project_id>" && exit 1)
+	curl -s http://localhost:8000/api/v1/projects/$(ID)/document-status | python3 -m json.tool
 
 # ── evals ─────────────────────────────────────────────────────────────────────
 
