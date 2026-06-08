@@ -31,12 +31,16 @@ class Settings(BaseSettings):
     top_k_retrieval: int = 20
     top_n_rerank: int = 4
     query_rewrite_count: int = 3
-    groundedness_check_enabled: bool = True
+
+    groundedness_check_enabled: bool = False
     groundedness_threshold: float = 0.7
+    
     domain_classifier_enabled: bool = True
     domain_classifier_confidence_threshold: float = 0.85
-    retrieval_gate_enabled: bool = True
-    retrieval_confidence_threshold: float = 0.5
+
+    retrieval_gate_enabled: bool = False
+    retrieval_confidence_threshold: float = 0.2
+    
     max_cost_per_workflow_usd: float = 0.50
     observability_provider: str = "langsmith"
     langsmith_api_key: str = ""
