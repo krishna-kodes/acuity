@@ -310,6 +310,10 @@ def list_projects(
                 return m.group(1) + "/milestones"
         return None
 
+    def _doc_filename(project) -> str | None:
+        docs = sorted(project.documents, key=lambda d: d.upload_ts) if project.documents else []
+        return docs[0].filename if docs else None
+
     return [
         ProjectResponse(
             id=str(p.id),
@@ -324,6 +328,7 @@ def list_projects(
             total_weeks=(p.effort_estimates or {}).get("total_weeks"),
             team_size=len((p.team_suggestion or {}).get("members") or []),
             milestones_url=_milestones_url(p.id),
+            document_filename=_doc_filename(p),
         )
         for p in projects
     ]

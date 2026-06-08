@@ -238,6 +238,12 @@ export type ProjectListItem = {
   current_phase: number
   created_at: string
   updated_at: string
+  module_count: number
+  tech_preview: string[]
+  total_weeks: number | null
+  team_size: number
+  milestones_url: string | null
+  document_filename: string | null
 }
 
 export async function listAllProjects(): Promise<ProjectListItem[]> {

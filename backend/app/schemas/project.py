@@ -34,6 +34,7 @@ class ProjectResponse(BaseModel):
     total_weeks: float | None = None
     team_size: int = 0
     milestones_url: str | None = None
+    document_filename: str | None = None
 
 
 class ProjectDetailResponse(BaseModel):
