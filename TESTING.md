@@ -423,6 +423,12 @@ cd evals          # mypy.ini lives here
 mypy backend/app
 ```
 
+<!-- Testing guardrails: -->
+
+python3 scripts/test_guardrail.py "How do I make pasta?"
+
+python3 /Users/work/Projects/acuity/scripts/test_guardrail.py "What are the main features?" --project-id 16
+
 ---
 
 *Last updated: 2026-06-06 — Week 11, AI Engineering Cohort*

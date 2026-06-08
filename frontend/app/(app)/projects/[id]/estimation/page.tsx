@@ -142,9 +142,9 @@ export default function EstimationPage({ params }: { params: Promise<{ id: strin
           <div className="flex flex-col gap-2">
             <p className="text-xs font-semibold text-text-muted uppercase tracking-wide">Work Modules</p>
             <div className="flex flex-wrap gap-2">
-              {modules.map((m) => (
+              {modules.map((m, i) => (
                 <span
-                  key={m.id}
+                  key={`${m.id}-${i}`}
                   className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[11px] font-medium bg-surface-subtle text-text-secondary border-border"
                 >
                   <span className="w-1.5 h-1.5 rounded-full bg-primary/60 shrink-0" />
