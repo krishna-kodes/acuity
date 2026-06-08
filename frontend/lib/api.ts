@@ -319,12 +319,46 @@ export async function updateTeam(
 
 export type ProposalSection = { heading: string; body: string }
 
+export type SectionStatus = "generated" | "draft" | "failed"
+
+export type RiskItem = { risk: string; mitigation: string }
+export type PersonaItem = { name: string; role: string; needs: string }
+export type FeatureItem = { title: string; description: string; in_scope: boolean }
+
+export type StructuredSection = {
+  section_id: string
+  title: string
+  status: SectionStatus
+  generated_at: string
+  content: string
+  items?: (RiskItem | PersonaItem | FeatureItem | Record<string, string>)[] | null
+}
+
 export type ProposalData = {
   id: string
   project_id: string
   content_path: string
   created_at: string
   sections: ProposalSection[]
+  structured_sections?: StructuredSection[] | null
+  template_version?: string | null
+}
+
+export async function regenerateSection(
+  projectId: string,
+  sectionId: string,
+  additionalContext?: string,
+): Promise<{ data: StructuredSection | null; error: unknown }> {
+  const res = await fetch(
+    `${_apiBase()}/api/v1/projects/${projectId}/proposal/sections/${sectionId}/regenerate`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ additional_context: additionalContext ?? "" }),
+    },
+  )
+  if (!res.ok) return { data: null, error: await res.json() }
+  return { data: await res.json(), error: null }
 }
 
 export async function generateProposalRaw(projectId: string): Promise<ProposalData> {

@@ -40,7 +40,8 @@ from app.schemas.project import (
     phase_to_int,
 )
 from app.schemas.modules import ModulePatchRequest, ModulesResponse, ModuleOut
-from app.schemas.proposal import ProposalResponse, ProposalRetryRequest, ProposalSectionOut
+from app.schemas.proposal import ProposalResponse, ProposalRetryRequest, ProposalSectionOut, RegenerateSectionRequest
+from app.schemas.proposal_sections import ProposalSectionId, SectionResponse, TEMPLATE_VERSION
 from app.schemas.sync import SyncConfigRequest, SyncConfigResponse, SyncProvider, SyncRequest, SyncResponse
 from app.services.ingestion import ingest_document
 from app.services.workflow import get_workflow
@@ -145,12 +146,23 @@ def _proposal_to_response(proposal: "Proposal", project_id: str) -> ProposalResp
             sections = [ProposalSectionOut(**s) for s in raw.get("sections", [])]
         except Exception:
             pass
+
+    structured_sections: list[SectionResponse] | None = None
+    if proposal.sections_json:
+        try:
+            raw = json.loads(proposal.sections_json)
+            structured_sections = [SectionResponse(**s) for s in raw]
+        except Exception:
+            pass
+
     return ProposalResponse(
         id=str(proposal.id),
         project_id=project_id,
         content_path=proposal.content_path,
         created_at=proposal.created_at.isoformat(),
         sections=sections,
+        structured_sections=structured_sections,
+        template_version=proposal.template_version,
     )
 
 
@@ -159,101 +171,29 @@ async def _run_proposal_generation(
     db: Session,
     extra_feedback: str = "",
 ) -> "Proposal":
-    """Build prompt, call LLM, persist DOCX + Proposal row. Does NOT advance phase."""
+    """Generate structured proposal, persist DOCX + Proposal row. Does NOT advance phase."""
     from app.services.exporter import generate_proposal_docx
-    from app.services.rag import retrieve
-    from app.services.llm_factory import get_llm
-    from app.models.clarification import Clarification
+    from app.services.proposal_generator import generate_structured_proposal
 
-    # 1. Gather document chunks via RAG
-    try:
-        chunks, _scores, _n = await retrieve(
-            str(project.id),
-            "project requirements scope objectives features",
-            top_k=12,
-            top_n=12,
-        )
-        doc_context = "\n\n---\n\n".join(c.get("text", "") for c in chunks)
-    except Exception:
-        doc_context = ""
-
-    # 2. Resolved clarifications
-    resolved = (
-        db.query(Clarification)
-        .filter(
-            Clarification.project_id == project.id,
-            Clarification.status == TBDStatus.answered,
-        )
-        .all()
+    # Generate all 10 structured sections via fan-out
+    structured_sections = await generate_structured_proposal(
+        project, db, additional_context=extra_feedback
     )
-    clarification_context = "\n".join(
-        f"- [{c.level}] {c.title}: {c.answer}" for c in resolved if c.answer
-    ) or "None"
-
-    open_items = (
-        db.query(Clarification)
-        .filter(
-            Clarification.project_id == project.id,
-            Clarification.status.in_([TBDStatus.open, TBDStatus.tbd]),
-        )
-        .all()
-    )
-    open_context = "\n".join(f"- {c.title}" for c in open_items) or "None"
-
-    # 3. Chat messages from LangGraph state
-    chat_context = "No chat history available."
-    try:
-        wf = await get_workflow()
-        config = {"configurable": {"thread_id": str(project.id)}}
-        state_snapshot = await wf.aget_state(config)
-        if state_snapshot:
-            chat_msgs = state_snapshot.values.get("chat_messages", [])
-            if chat_msgs:
-                chat_context = "\n".join(
-                    f"{m['role'].upper()}: {m['content']}"
-                    for m in chat_msgs[-10:]
-                )
-    except Exception:
-        pass
-
-    # 4. Build prompt
-    feedback_block = (
-        f"\n\n## Revision Feedback\n{extra_feedback}" if extra_feedback else ""
-    )
-    llm = get_llm()
-    prompt = (
-        f'You are a senior business analyst. Write a formal requirements proposal document '
-        f'for the project "{project.name}".\n\n'
-        f"## Source Document Excerpts\n{doc_context or 'No document context available.'}\n\n"
-        f"## Resolved Clarifications\n{clarification_context}\n\n"
-        f"## Recent Chat Refinements\n{chat_context}\n\n"
-        f"## Open Items\n{open_context}"
-        f"{feedback_block}\n\n"
-        "Write a professional proposal with these exact sections using '## ' headings:\n"
-        "## Executive Summary\n"
-        "## Project Scope & Objectives\n"
-        "## Functional Requirements\n"
-        "## Non-Functional Requirements\n"
-        "## Resolved Items\n"
-        "## Open Items & Assumptions\n\n"
-        "Be specific. Use information from the document excerpts. "
-        "Do not invent requirements not present in the source."
+    sections_json_str = json.dumps(
+        [s.model_dump(mode="json") for s in structured_sections]
     )
 
-    try:
-        response = await llm.ainvoke([{"role": "user", "content": prompt}])
-        generated_text = response.content if hasattr(response, "content") else str(response)
-    except Exception as exc:
-        generated_text = (
-            f"## Executive Summary\nProposal generation encountered an error: {exc}\n\n"
-            f"## Project Scope & Objectives\n{doc_context[:500] if doc_context else 'See source document.'}"
-        )
-
-    # 5. Build structured content and write DOCX
+    # Build legacy flat content for backward compat (DOCX + content_json)
+    generated_text = "\n\n".join(
+        f"## {s.title}\n{s.content}" for s in structured_sections
+    )
     content = _parse_proposal_sections(project.name, generated_text)
-    content_path = generate_proposal_docx(project.id, content)
 
-    # 6. Persist proposal row with content_json
+    # DOCX with structured sections
+    sections_dicts = [s.model_dump(mode="json") for s in structured_sections]
+    content_path = generate_proposal_docx(project.id, content, structured_sections=sections_dicts)
+
+    # Persist proposal row
     doc = db.query(Document).filter(Document.project_id == project.id).first()
     content_dict = dataclasses.asdict(content)
     proposal = Proposal(
@@ -261,6 +201,8 @@ async def _run_proposal_generation(
         document_id=doc.id if doc else 0,
         content_path=content_path,
         content_json=json.dumps(content_dict),
+        sections_json=sections_json_str,
+        template_version=TEMPLATE_VERSION,
     )
     db.add(proposal)
     db.commit()
@@ -858,6 +800,74 @@ def approve_proposal(
     project.phase = ProjectPhase.modules
     db.commit()
     return _proposal_to_response(proposal, project_id)
+
+
+@router.post(
+    "/projects/{project_id}/proposal/sections/{section_id}/regenerate",
+    response_model=SectionResponse,
+)
+async def regenerate_section(
+    project_id: str,
+    section_id: ProposalSectionId,
+    body: RegenerateSectionRequest = None,
+    db: Session = Depends(get_db),
+) -> SectionResponse:
+    from app.services.proposal_generator import generate_single_section
+
+    if body is None:
+        body = RegenerateSectionRequest()
+
+    if section_id == ProposalSectionId.open_questions:
+        raise HTTPException(status_code=400, detail="open_questions is read-only — cannot regenerate")
+
+    project = _get_project_or_404(project_id, db)
+    proposal = (
+        db.query(Proposal)
+        .filter(Proposal.project_id == project.id)
+        .order_by(Proposal.created_at.desc())
+        .first()
+    )
+    if not proposal:
+        raise HTTPException(status_code=404, detail="No proposal found for this project")
+    if proposal.template_version != TEMPLATE_VERSION:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Proposal template_version mismatch: expected {TEMPLATE_VERSION}, got {proposal.template_version}",
+        )
+
+    updated_section = await generate_single_section(
+        section_id, project, db, additional_context=body.additional_context
+    )
+
+    # Persist updated section back into sections_json
+    if proposal.sections_json:
+        try:
+            raw = json.loads(proposal.sections_json)
+            raw = [s for s in raw if s.get("section_id") != section_id.value]
+            raw.append(updated_section.model_dump(mode="json"))
+            # Re-sort to enum order
+            order = [sid.value for sid in ProposalSectionId]
+            raw.sort(key=lambda s: order.index(s["section_id"]) if s["section_id"] in order else 99)
+            proposal.sections_json = json.dumps(raw)
+            db.commit()
+        except Exception:
+            pass
+
+    # Track token usage
+    try:
+        from app.services.metrics_tracker import record_tokens
+        record_tokens(
+            project_id=int(project_id),
+            phase="proposal_section_regen",
+            model="claude-sonnet-4-6",
+            input_tokens=0,
+            output_tokens=0,
+            cost_usd=0.0,
+        )
+    except Exception:
+        pass
+
+    return updated_section
 
 
 # ── Modules endpoints ──────────────────────────────────────────────────────────

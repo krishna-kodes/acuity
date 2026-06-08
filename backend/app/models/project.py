@@ -74,6 +74,8 @@ class Proposal(Base):
     document_id: Mapped[int] = mapped_column(Integer, ForeignKey("documents.id"), nullable=False)
     content_path: Mapped[str] = mapped_column(String(500), nullable=False)
     content_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sections_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    template_version: Mapped[str | None] = mapped_column(String(10), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     project: Mapped["Project"] = relationship(back_populates="proposals")

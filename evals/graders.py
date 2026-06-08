@@ -778,6 +778,175 @@ def grade_retrieval_gate_precision(
     )
 
 
+# ---------------------------------------------------------------------------
+# Structured proposal graders (template_version=1.0)
+# ---------------------------------------------------------------------------
+
+def grade_section_presence(actual: dict, expected: dict, context: dict) -> GradeResult:
+    """Check all required section IDs are present in the structured proposal response."""
+    required = expected.get("required_section_ids")
+    if not required:
+        return _skip("required_section_ids not specified")
+
+    sections = actual.get("structured_sections") or actual.get("sections") or []
+    present = {s["section_id"] for s in sections if isinstance(s, dict) and "section_id" in s}
+    required_set = set(required)
+    missing = required_set - present
+    score = len(present & required_set) / len(required_set) if required_set else 1.0
+    passed = score >= expected.get("section_presence_min", 1.0)
+    return GradeResult(
+        passed=passed,
+        score=score,
+        reasoning=f"Present: {sorted(present & required_set)}, Missing: {sorted(missing)}",
+        metadata={"missing": sorted(missing)},
+    )
+
+
+def grade_open_questions_determinism(actual: dict, expected: dict, context: dict) -> GradeResult:
+    """Assert open_questions section contains exactly N items matching TBD clarifications."""
+    exact = expected.get("open_questions_count_exact")
+    if exact is None:
+        return _skip("open_questions_count_exact not specified")
+
+    sections = actual.get("structured_sections") or []
+    oq = next((s for s in sections if isinstance(s, dict) and s.get("section_id") == "open_questions"), None)
+    if oq is None:
+        return GradeResult(passed=False, score=0.0, reasoning="open_questions section not found in response")
+
+    items = oq.get("items") or []
+    count = len(items)
+    passed = count == exact
+    return GradeResult(
+        passed=passed,
+        score=1.0 if passed else 0.0,
+        reasoning=f"Expected {exact} items, got {count}",
+        metadata={"expected": exact, "actual": count},
+    )
+
+
+def grade_risks_grounding(actual: dict, expected: dict, context: dict) -> GradeResult:
+    """Verify risks_and_mitigations items are traceable to OOS clarifications or RAG chunks.
+
+    # REGRESSION: do not change this prompt without re-running evals/regression_suite.py
+    """
+    threshold = expected.get("risks_groundedness_min", 0.70)
+    sections = actual.get("structured_sections") or []
+    risks_sec = next(
+        (s for s in sections if isinstance(s, dict) and s.get("section_id") == "risks_and_mitigations"),
+        None,
+    )
+    if risks_sec is None:
+        return GradeResult(passed=False, score=0.0, reasoning="risks_and_mitigations section not found")
+
+    items = risks_sec.get("items") or []
+    if not items:
+        return GradeResult(passed=True, score=1.0, reasoning="No risk items to ground — vacuously pass")
+
+    oos_items = actual.get("oos_clarifications", [])
+    rag_chunks = actual.get("retrieved_chunks", "")
+    context_text = "\n".join(str(o) for o in oos_items) + "\n" + str(rag_chunks)
+    response_text = "\n".join(
+        f"Risk: {item.get('risk','')} | Mitigation: {item.get('mitigation','')}"
+        for item in items
+        if isinstance(item, dict)
+    )
+
+    try:
+        prompt = GROUNDEDNESS_JUDGE_PROMPT.format(
+            retrieved_chunks=context_text[:3000],
+            llm_response=response_text,
+        )
+        result = _llm_judge(prompt)
+        score = float(result.get("score", 0.0))
+        passed = score >= threshold
+        return GradeResult(
+            passed=passed,
+            score=score,
+            reasoning=result.get("reasoning", ""),
+            metadata={"unsupported": result.get("unsupported_claims", [])},
+        )
+    except Exception as exc:
+        return GradeResult(passed=False, score=0.0, reasoning=f"Judge error: {exc}")
+
+
+def grade_section_completeness(actual: dict, expected: dict, context: dict) -> GradeResult:
+    """Run G-Eval style rubric per section; score = mean across sections.
+
+    # REGRESSION: do not change this prompt without re-running evals/regression_suite.py
+    """
+    threshold = expected.get("section_completeness_min", 0.75)
+    sections = actual.get("structured_sections") or []
+    if not sections:
+        return _skip("structured_sections not present in actual")
+
+    _SECTION_RUBRIC = """You are a proposal quality evaluator.
+Section title: {title}
+Section content: {content}
+Score this section 0.0–1.0 on completeness, specificity, and relevance to a software PRD.
+Output only: {{"score": float, "reasoning": str}}"""
+
+    scores: list[float] = []
+    for sec in sections:
+        if not isinstance(sec, dict):
+            continue
+        content = sec.get("content", "")
+        if not content or sec.get("status") == "failed":
+            scores.append(0.0)
+            continue
+        try:
+            prompt = _SECTION_RUBRIC.format(title=sec.get("title", ""), content=content[:1500])
+            result = _llm_judge(prompt)
+            scores.append(float(result.get("score", 0.0)))
+        except Exception:
+            scores.append(0.0)
+
+    if not scores:
+        return GradeResult(passed=False, score=0.0, reasoning="No sections scored")
+
+    mean_score = sum(scores) / len(scores)
+    return GradeResult(
+        passed=mean_score >= threshold,
+        score=mean_score,
+        reasoning=f"Mean completeness score across {len(scores)} sections: {mean_score:.2f}",
+        metadata={"per_section_scores": scores},
+    )
+
+
+def grade_regen_idempotency(actual: dict, expected: dict, context: dict) -> GradeResult:
+    """Check cosine similarity >= threshold between two regeneration runs of the same section."""
+    threshold = expected.get("regen_similarity_min", 0.85)
+    content_1 = actual.get("regen_section_content_1")
+    content_2 = actual.get("regen_section_content_2")
+
+    if content_1 is None or content_2 is None:
+        return _skip("regen_section_content_1 / regen_section_content_2 not in actual")
+
+    if not _NUMPY_AVAILABLE:
+        return _unavailable("numpy")
+
+    if not eval_settings.openai_api_key:
+        return GradeResult(passed=False, score=0.0, reasoning="OPENAI_API_KEY not set — cannot embed")
+
+    try:
+        import openai
+        client = openai.OpenAI(api_key=eval_settings.openai_api_key)
+        resp = client.embeddings.create(
+            model="text-embedding-3-small",
+            input=[str(content_1), str(content_2)],
+            dimensions=1536,
+        )
+        emb1 = resp.data[0].embedding
+        emb2 = resp.data[1].embedding
+        sim = _cosine(emb1, emb2)
+        return GradeResult(
+            passed=sim >= threshold,
+            score=sim,
+            reasoning=f"Cosine similarity between two regen runs: {sim:.3f} (threshold {threshold})",
+        )
+    except Exception as exc:
+        return GradeResult(passed=False, score=0.0, reasoning=f"Embedding error: {exc}")
+
+
 GRADER_MAP: dict[str, Any] = {
     "retrieval_source_match": grade_retrieval_source_match,
     "answer_relevancy": grade_answer_relevancy,
@@ -799,6 +968,11 @@ GRADER_MAP: dict[str, Any] = {
     "document_ingestion_check": grade_document_ingestion_check,
     "domain_classifier_accuracy": grade_domain_classifier_accuracy,
     "retrieval_gate_precision": grade_retrieval_gate_precision,
+    "section_presence": grade_section_presence,
+    "open_questions_determinism": grade_open_questions_determinism,
+    "risks_grounding": grade_risks_grounding,
+    "section_completeness": grade_section_completeness,
+    "regen_idempotency": grade_regen_idempotency,
 }
 
 
@@ -850,6 +1024,16 @@ def select_graders(test_case: dict) -> list[str]:
         graders += ["domain_classifier_accuracy"]
     if "expected_gate_status" in expected:
         graders += ["retrieval_gate_precision"]
+    if "required_section_ids" in expected:
+        graders += ["section_presence"]
+    if "open_questions_count_exact" in expected:
+        graders += ["open_questions_determinism"]
+    if "risks_groundedness_min" in expected:
+        graders += ["risks_grounding"]
+    if "section_completeness_min" in expected:
+        graders += ["section_completeness"]
+    if "regen_similarity_min" in expected:
+        graders += ["regen_idempotency"]
 
     # Deduplicate preserving order
     seen: set[str] = set()

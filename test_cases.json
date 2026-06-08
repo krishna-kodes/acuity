@@ -351,5 +351,66 @@
     "input": {"message": "What is the scope of the project as described in the document?", "project_id_with_docs": true},
     "expected": {"expected_gate_status": "pass"},
     "regression": false
+  },
+  {
+    "id": "tc-029",
+    "phase": 2,
+    "description": "Structured proposal — all 10 section IDs present in response",
+    "input": {"action": "generate_proposal", "project_id_with_docs": true},
+    "fixture": "fixtures/proposal_complete.txt",
+    "expected": {
+      "required_section_ids": [
+        "overview", "problem_statement", "goals_and_non_goals", "target_audience",
+        "key_features", "technical_requirements", "risks_and_mitigations",
+        "success_metrics", "timeline_and_milestones", "open_questions"
+      ],
+      "section_presence_min": 1.0
+    },
+    "regression": false
+  },
+  {
+    "id": "tc-030",
+    "phase": 2,
+    "description": "open_questions determinism — N TBD clarifications produce exactly N open_questions items",
+    "input": {"action": "generate_proposal", "project_id_with_docs": true},
+    "fixture": "fixtures/proposal_complete.txt",
+    "expected": {
+      "tbd_clarification_count": 3,
+      "open_questions_count_exact": 3
+    },
+    "regression": false
+  },
+  {
+    "id": "tc-031",
+    "phase": 2,
+    "description": "risks_and_mitigations grounding — every RiskItem traceable to OOS clarification or RAG chunk",
+    "input": {"action": "generate_proposal", "project_id_with_docs": true},
+    "fixture": "fixtures/proposal_complete.txt",
+    "expected": {
+      "risks_groundedness_min": 0.70
+    },
+    "regression": false
+  },
+  {
+    "id": "tc-032",
+    "phase": 2,
+    "description": "Section-level proposal completeness — DeepEval G-Eval per section >= 0.75",
+    "input": {"action": "generate_proposal", "project_id_with_docs": true},
+    "fixture": "fixtures/proposal_complete.txt",
+    "expected": {
+      "section_completeness_min": 0.75
+    },
+    "regression": false
+  },
+  {
+    "id": "tc-033",
+    "phase": 2,
+    "description": "Per-section regeneration idempotency — cosine similarity >= 0.85 between two regen runs of same section",
+    "input": {"action": "regenerate_section", "section_id": "overview", "project_id_with_docs": true},
+    "fixture": "fixtures/proposal_complete.txt",
+    "expected": {
+      "regen_similarity_min": 0.85
+    },
+    "regression": false
   }
 ]
