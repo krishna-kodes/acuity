@@ -7,6 +7,7 @@ export interface ChatMessage {
   role: MessageRole;
   text: string;
   timestamp?: string;
+  confidenceScore?: number | null;
 }
 
 interface ChatThreadProps {
@@ -55,6 +56,18 @@ function TypingIndicator() {
   );
 }
 
+function ConfidenceBadge({ score }: { score: number }) {
+  const [color, label] =
+    score >= 0.8 ? ["bg-success-subtle text-success", `${Math.round(score * 100)}% confident`]
+    : score >= 0.6 ? ["bg-warning-subtle text-warning", `${Math.round(score * 100)}% confident`]
+    : ["bg-destructive-subtle text-destructive", `${Math.round(score * 100)}% confident`];
+  return (
+    <span className={cn("inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium", color)}>
+      {label}
+    </span>
+  );
+}
+
 function MessageBubble({ message }: { message: ChatMessage }) {
   const isAI = message.role === "ai";
 
@@ -83,11 +96,16 @@ function MessageBubble({ message }: { message: ChatMessage }) {
         >
           {message.text}
         </div>
-        {message.timestamp && (
-          <span className="text-[11px] text-text-muted px-1">
-            {message.timestamp}
-          </span>
-        )}
+        <div className="flex items-center gap-1.5 px-1">
+          {message.timestamp && (
+            <span className="text-[11px] text-text-muted">
+              {message.timestamp}
+            </span>
+          )}
+          {isAI && message.confidenceScore != null && (
+            <ConfidenceBadge score={message.confidenceScore} />
+          )}
+        </div>
       </div>
     </div>
   );

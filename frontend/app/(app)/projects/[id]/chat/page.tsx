@@ -184,11 +184,15 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
       for (const line of lines) {
         if (!line.startsWith("data: ")) continue;
         try {
-          const event = JSON.parse(line.slice(6)) as { type: string; content?: string; items?: unknown[]; message?: string };
+          const event = JSON.parse(line.slice(6)) as { type: string; content?: string; items?: unknown[]; message?: string; score?: number };
           if (event.type === "token" && event.content) {
             accumulated += event.content;
             setMessages((prev) =>
               prev.map((m) => m.id === aiId ? { ...m, text: accumulated } : m)
+            );
+          } else if (event.type === "groundedness" && event.score != null) {
+            setMessages((prev) =>
+              prev.map((m) => m.id === aiId ? { ...m, confidenceScore: event.score } : m)
             );
           } else if (event.type === "tbds") {
             queryClient.invalidateQueries({ queryKey: ["tbds", projectId] });
