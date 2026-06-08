@@ -1208,8 +1208,14 @@ async def estimate_effort(
     # Return cached result if estimation already ran
     cached = project.effort_estimates or {}
     if cached and project.phase in _POST_ESTIMATION_PHASES:
+        cached_confidence = cached.get("confidence", 0.7)
+        cached_breakdown = cached.get("breakdown", {})
+        cached_epics = cached.get("epics") or [
+            {"title": p.replace("_", " ").title(), "estimated_points": pts, "confidence": cached_confidence}
+            for p, pts in cached_breakdown.items()
+        ]
         return EstimationResponse(
-            epics=cached.get("epics", []),
+            epics=cached_epics,
             total_points=cached.get("total_points", 0),
             total_weeks=cached.get("total_weeks", 0),
         )
@@ -1229,10 +1235,17 @@ async def estimate_effort(
         project.phase = ProjectPhase.estimation
         db.commit()
 
+    confidence = effort.get("confidence", 0.7)
+    breakdown = effort.get("breakdown", {})
+    breakdown_epics = [
+        {"title": phase.replace("_", " ").title(), "estimated_points": pts, "confidence": confidence}
+        for phase, pts in breakdown.items()
+    ] if breakdown else []
+
     return EstimationResponse(
-        epics=effort.get("epics", [{"title": "Stub Epic", "estimated_points": 8, "confidence": 0.8}]),
-        total_points=effort.get("total_points", 8),
-        total_weeks=effort.get("total_weeks", 2.0),
+        epics=effort.get("epics") or breakdown_epics or [],
+        total_points=effort.get("total_points", 0),
+        total_weeks=effort.get("total_weeks", 0.0),
     )
 
 
