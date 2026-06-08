@@ -323,8 +323,7 @@ export function AppSidebar({ projectId: projectIdProp, activePhase, className }:
             <path d="M2 10L7 3l5 7" />
           </svg>
         </div>
-        <span className="text-sm font-semibold text-foreground">Cohort PM</span>
-        <span className="text-xs text-text-muted"> / AI Project Studio</span>
+        <span className="text-sm font-semibold text-foreground">Acuity</span>
       </div>
 
       {/* Nav */}
