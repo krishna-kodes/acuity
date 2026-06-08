@@ -738,6 +738,46 @@ def grade_document_ingestion_check(
     return GradeResult(passed=passed, score=score, reasoning=reasoning)
 
 
+# ---------------------------------------------------------------------------
+# Grader 19: domain_classifier_accuracy
+# ---------------------------------------------------------------------------
+
+def grade_domain_classifier_accuracy(
+    actual: dict, expected: dict, context: dict
+) -> GradeResult:
+    """Check domain classifier is_pm_related matches expected value."""
+    if "expected_is_pm_related" not in expected:
+        return _skip()
+    exp = expected["expected_is_pm_related"]
+    got = actual.get("is_pm_related")
+    passed = got == exp
+    return GradeResult(
+        passed=passed,
+        score=1.0 if passed else 0.0,
+        reasoning=f"Expected is_pm_related={exp}, got {got!r}",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Grader 20: retrieval_gate_precision
+# ---------------------------------------------------------------------------
+
+def grade_retrieval_gate_precision(
+    actual: dict, expected: dict, context: dict
+) -> GradeResult:
+    """Check retrieval gate status matches expected outcome."""
+    if "expected_gate_status" not in expected:
+        return _skip()
+    exp = expected["expected_gate_status"]
+    got = actual.get("gate_status")
+    passed = got == exp
+    return GradeResult(
+        passed=passed,
+        score=1.0 if passed else 0.0,
+        reasoning=f"Expected gate_status={exp!r}, got {got!r}",
+    )
+
+
 GRADER_MAP: dict[str, Any] = {
     "retrieval_source_match": grade_retrieval_source_match,
     "answer_relevancy": grade_answer_relevancy,
@@ -757,6 +797,8 @@ GRADER_MAP: dict[str, Any] = {
     "tech_stack_rationale_quality": grade_tech_stack_rationale_quality,
     "http_status_check": grade_http_status_check,
     "document_ingestion_check": grade_document_ingestion_check,
+    "domain_classifier_accuracy": grade_domain_classifier_accuracy,
+    "retrieval_gate_precision": grade_retrieval_gate_precision,
 }
 
 
@@ -804,6 +846,10 @@ def select_graders(test_case: dict) -> list[str]:
         graders += ["http_status_check"]
     if "document_status" in expected or "chroma_chunk_count_min" in expected:
         graders += ["document_ingestion_check"]
+    if "expected_is_pm_related" in expected:
+        graders += ["domain_classifier_accuracy"]
+    if "expected_gate_status" in expected:
+        graders += ["retrieval_gate_precision"]
 
     # Deduplicate preserving order
     seen: set[str] = set()

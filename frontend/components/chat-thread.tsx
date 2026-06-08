@@ -2,12 +2,20 @@ import { cn } from "@/lib/utils";
 
 export type MessageRole = "ai" | "pm";
 
+export interface GroundednessWarning {
+  score: number;
+  unsupported_claims: string[];
+  reasoning: string;
+  source: string | null;
+}
+
 export interface ChatMessage {
   id: string;
   role: MessageRole;
   text: string;
   timestamp?: string;
   confidenceScore?: number | null;
+  groundednessWarning?: GroundednessWarning | null;
 }
 
 interface ChatThreadProps {
@@ -68,6 +76,23 @@ function ConfidenceBadge({ score }: { score: number }) {
   );
 }
 
+function GroundednessWarningBanner({ warning }: { warning: GroundednessWarning }) {
+  return (
+    <div className="mt-1 px-3 py-2 bg-warning-subtle border border-warning/30 rounded-lg text-[11px] text-warning space-y-1">
+      <div className="font-medium">
+        Response may contain unverified claims ({Math.round(warning.score * 100)}% grounded)
+      </div>
+      {warning.unsupported_claims.length > 0 && (
+        <ul className="list-disc list-inside space-y-0.5 text-warning/80">
+          {warning.unsupported_claims.map((c, i) => (
+            <li key={i}>{c}</li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 function MessageBubble({ message }: { message: ChatMessage }) {
   const isAI = message.role === "ai";
 
@@ -96,6 +121,9 @@ function MessageBubble({ message }: { message: ChatMessage }) {
         >
           {message.text}
         </div>
+        {isAI && message.groundednessWarning && (
+          <GroundednessWarningBanner warning={message.groundednessWarning} />
+        )}
         <div className="flex items-center gap-1.5 px-1">
           {message.timestamp && (
             <span className="text-[11px] text-text-muted">

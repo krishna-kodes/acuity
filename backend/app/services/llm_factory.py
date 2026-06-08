@@ -40,7 +40,16 @@ def get_llm(fast: bool = False) -> BaseChatModel:
             api_key=settings.openai_api_key or None,
         )
 
-    raise ValueError(f"Unknown LLM provider: {provider!r}. Expected 'google' or 'openai'.")
+    if provider == "anthropic":
+        from langchain_anthropic import ChatAnthropic
+
+        return ChatAnthropic(
+            model=model,
+            temperature=temperature,
+            api_key=settings.anthropic_api_key or None,
+        )
+
+    raise ValueError(f"Unknown LLM provider: {provider!r}. Expected 'google', 'openai', or 'anthropic'.")
 
 
 def get_fast_llm() -> BaseChatModel:

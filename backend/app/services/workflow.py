@@ -47,7 +47,11 @@ class ProjectState(TypedDict):
     phase_status: dict  # {"phase_1": "complete", "phase_2": "in_progress", ...}
     chat_messages: list          # NEW: list of {"role": str, "content": str}
     chat_proceed: bool           # NEW: set True by PM to exit chat loop
-    groundedness_score: float | None  # NEW: last groundedness check score
+    groundedness_score: float | None  # last groundedness check score
+    gate_status: str | None           # "pass" | "low_confidence" | "no_results" | "provenance_mismatch"
+    gate_message: str | None          # human-readable gate message when status != "pass"
+    groundedness_reasoning: str | None
+    groundedness_unsupported_claims: list[str] | None
 
 
 _EMPTY_STATE: ProjectState = {
@@ -64,24 +68,14 @@ _EMPTY_STATE: ProjectState = {
     "chat_messages": [],
     "chat_proceed": False,
     "groundedness_score": None,
+    "gate_status": None,
+    "gate_message": None,
+    "groundedness_reasoning": None,
+    "groundedness_unsupported_claims": None,
 }
 
 
-class _GroundednessResult(BaseModel):
-    score: float
-    reasoning: str
-    unsupported_claims: list[str]
 
-
-_GROUNDEDNESS_PROMPT = (
-    "System: You are an evaluation judge. Answer only with a JSON object.\n"
-    "User:\n"
-    "  Context: {context}\n"
-    "  Response: {response}\n"
-    "  Question: Is every factual claim in the Response directly supported by the Context?\n"
-    "  Score 0-1 where 1 = fully grounded, 0 = contains unsupported claims.\n"
-    '  Output: {{"score": float, "reasoning": str, "unsupported_claims": list[str]}}'
-)
 
 
 # ---------------------------------------------------------------------------
@@ -286,6 +280,22 @@ async def _chat_turn_node(state: ProjectState) -> dict[str, Any]:
     )
 
     chunks, reranker_scores, n_candidates = await retrieve(project_id, last_user)
+
+    # Layer 2: retrieval gate (no LLM — pure score/metadata evaluation)
+    from app.guardrails.retrieval_gate import evaluate as _gate_evaluate
+    _gate = _gate_evaluate(chunks, project_id, list(reranker_scores))
+    if _gate.status != "pass":
+        return {
+            "chat_messages": messages,
+            "tbd_items": list(state.get("tbd_items") or []),
+            "groundedness_score": None,
+            "gate_status": _gate.status,
+            "gate_message": _gate.message,
+            "groundedness_reasoning": None,
+            "groundedness_unsupported_claims": None,
+        }
+    chunks = _gate.chunks
+
     context = "\n\n".join(
         f"[{c.get('section_hint', '')}] {c['text']}" for c in chunks
     )
@@ -339,27 +349,22 @@ async def _chat_turn_node(state: ProjectState) -> dict[str, Any]:
         record_tokens(int(project_id), "phase_2", settings.main_llm_model, _inp, _out, calc_cost(_inp, _out))
     response_content = "".join(response_parts)
 
-    groundedness_score = None
-    if settings.groundedness_check_enabled:
-        judge = llm.with_structured_output(_GroundednessResult)
-        gs = await judge.with_config({"run_name": "groundedness_judge"}).ainvoke([
-            HumanMessage(content=_GROUNDEDNESS_PROMPT.format(
-                context=context, response=response_content
-            ))
-        ])
-        groundedness_score = float(gs.score) if hasattr(gs, "score") else None
-        if groundedness_score is not None:
-            record_quality(
-                int(project_id), "phase_2", "groundedness",
-                groundedness_score,
-                gs.reasoning if hasattr(gs, "reasoning") else None,
-            )
+    # Layer 3: groundedness judge (via module — replaces inline block)
+    from app.guardrails.groundedness import evaluate as _gnd_evaluate
+    _gnd = await _gnd_evaluate(response_content, context, project_id)
+    groundedness_score = _gnd.score if _gnd is not None else None
+    groundedness_reasoning = _gnd.reasoning if _gnd is not None else None
+    groundedness_unsupported_claims = _gnd.unsupported_claims if _gnd is not None else None
 
     messages.append({"role": "assistant", "content": response_content})
     return {
         "chat_messages": messages,
         "tbd_items": list(state.get("tbd_items") or []) + new_tbds,
         "groundedness_score": groundedness_score,
+        "gate_status": None,
+        "gate_message": None,
+        "groundedness_reasoning": groundedness_reasoning,
+        "groundedness_unsupported_claims": groundedness_unsupported_claims,
     }
 
 

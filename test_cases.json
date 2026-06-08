@@ -247,5 +247,109 @@
     },
     "max_tool_iterations": 15,
     "regression": false
+  },
+  {
+    "id": "tc-016",
+    "phase": 2,
+    "description": "Domain classifier: sprint velocity question is PM-related",
+    "input": {"message": "What are the sprint velocity estimates for the team?"},
+    "expected": {"expected_is_pm_related": true},
+    "regression": false
+  },
+  {
+    "id": "tc-017",
+    "phase": 2,
+    "description": "Domain classifier: tech lead question is PM-related",
+    "input": {"message": "Who should be the tech lead for this project?"},
+    "expected": {"expected_is_pm_related": true},
+    "regression": false
+  },
+  {
+    "id": "tc-018",
+    "phase": 2,
+    "description": "Domain classifier: epics question is PM-related",
+    "input": {"message": "List the epics from the requirements document."},
+    "expected": {"expected_is_pm_related": true},
+    "regression": false
+  },
+  {
+    "id": "tc-019",
+    "phase": 2,
+    "description": "Domain classifier: delivery date question is PM-related",
+    "input": {"message": "What is the estimated delivery date for the MVP?"},
+    "expected": {"expected_is_pm_related": true},
+    "regression": false
+  },
+  {
+    "id": "tc-020",
+    "phase": 2,
+    "description": "Domain classifier: tech stack question is PM-related",
+    "input": {"message": "What tech stack does the requirements document recommend?"},
+    "expected": {"expected_is_pm_related": true},
+    "regression": false
+  },
+  {
+    "id": "tc-021",
+    "phase": 2,
+    "description": "Domain classifier: cooking question is NOT PM-related",
+    "input": {"message": "How do I make pasta carbonara?"},
+    "expected": {"expected_is_pm_related": false, "http_status": 400},
+    "regression": false
+  },
+  {
+    "id": "tc-022",
+    "phase": 2,
+    "description": "Domain classifier: weather question is NOT PM-related",
+    "input": {"message": "What is the weather like in London today?"},
+    "expected": {"expected_is_pm_related": false, "http_status": 400},
+    "regression": false
+  },
+  {
+    "id": "tc-023",
+    "phase": 2,
+    "description": "Domain classifier: joke request is NOT PM-related",
+    "input": {"message": "Tell me a funny joke."},
+    "expected": {"expected_is_pm_related": false, "http_status": 400},
+    "regression": false
+  },
+  {
+    "id": "tc-024",
+    "phase": 2,
+    "description": "Domain classifier: general coding question is NOT PM-related",
+    "input": {"message": "How do I fix a Python syntax error?"},
+    "expected": {"expected_is_pm_related": false, "http_status": 400},
+    "regression": false
+  },
+  {
+    "id": "tc-025",
+    "phase": 2,
+    "description": "Domain classifier: math question is NOT PM-related",
+    "input": {"message": "What is 2 + 2?"},
+    "expected": {"expected_is_pm_related": false, "http_status": 400},
+    "regression": false
+  },
+  {
+    "id": "tc-026",
+    "phase": 2,
+    "description": "Retrieval gate: on-topic query about document content should pass",
+    "input": {"message": "What are the functional requirements listed in the document?", "project_id_with_docs": true},
+    "expected": {"expected_gate_status": "pass"},
+    "regression": false
+  },
+  {
+    "id": "tc-027",
+    "phase": 2,
+    "description": "Retrieval gate: query about core architecture should pass",
+    "input": {"message": "Describe the system architecture from the requirements.", "project_id_with_docs": true},
+    "expected": {"expected_gate_status": "pass"},
+    "regression": false
+  },
+  {
+    "id": "tc-028",
+    "phase": 2,
+    "description": "Retrieval gate: query about project scope should pass",
+    "input": {"message": "What is the scope of the project as described in the document?", "project_id_with_docs": true},
+    "expected": {"expected_gate_status": "pass"},
+    "regression": false
   }
 ]

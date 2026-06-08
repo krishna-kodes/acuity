@@ -184,7 +184,17 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
       for (const line of lines) {
         if (!line.startsWith("data: ")) continue;
         try {
-          const event = JSON.parse(line.slice(6)) as { type: string; content?: string; items?: unknown[]; message?: string; score?: number };
+          const event = JSON.parse(line.slice(6)) as {
+            type: string;
+            content?: string;
+            items?: unknown[];
+            message?: string;
+            score?: number;
+            unsupported_claims?: string[];
+            reasoning?: string;
+            source?: string | null;
+            status?: string;
+          };
           if (event.type === "token" && event.content) {
             accumulated += event.content;
             setMessages((prev) =>
@@ -193,6 +203,20 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
           } else if (event.type === "groundedness" && event.score != null) {
             setMessages((prev) =>
               prev.map((m) => m.id === aiId ? { ...m, confidenceScore: event.score } : m)
+            );
+          } else if (event.type === "groundedness_warning") {
+            setMessages((prev) =>
+              prev.map((m) => m.id === aiId
+                ? { ...m, groundednessWarning: { score: event.score ?? 0, unsupported_claims: event.unsupported_claims ?? [], reasoning: event.reasoning ?? "", source: event.source ?? null } }
+                : m
+              )
+            );
+          } else if (event.type === "gate_blocked") {
+            setMessages((prev) =>
+              prev.map((m) => m.id === aiId
+                ? { ...m, text: event.message ?? "I couldn't find relevant information in your document." }
+                : m
+              )
             );
           } else if (event.type === "tbds") {
             queryClient.invalidateQueries({ queryKey: ["tbds", projectId] });
