@@ -341,6 +341,66 @@ def get_project(
     )
 
 
+@router.get("/projects/{project_id}/live-status")
+def get_live_status(
+    project_id: str,
+    db: Session = Depends(get_db),
+):
+    from datetime import datetime, timezone, timedelta
+    from app.models.observability import Metric, LatencyLog
+    from app.schemas.live_status import LiveStatusResponse, PHASE_AGENT_NAMES
+
+    _get_project_or_404(project_id, db)
+    pid = int(project_id)
+
+    rows = db.query(Metric).filter(Metric.project_id == pid).all()
+    total_tokens = sum(r.input_tokens + r.output_tokens for r in rows)
+    total_cost = sum(r.cost_usd for r in rows)
+    llm_call_count = len(rows)
+
+    latest_metric = (
+        db.query(Metric)
+        .filter(Metric.project_id == pid)
+        .order_by(Metric.created_at.desc())
+        .first()
+    )
+
+    latest_latency = (
+        db.query(LatencyLog)
+        .filter(LatencyLog.project_id == pid)
+        .order_by(LatencyLog.created_at.desc())
+        .first()
+    )
+
+    agent: str | None = None
+    model: str | None = None
+    active_phase: str | None = None
+    is_recent = False
+
+    if latest_metric:
+        active_phase = latest_metric.phase
+        agent = PHASE_AGENT_NAMES.get(latest_metric.phase)
+        model = latest_metric.model
+        cutoff = datetime.now(timezone.utc) - timedelta(seconds=120)
+        ts = latest_metric.created_at
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        is_recent = ts >= cutoff
+
+    return LiveStatusResponse(
+        agent=agent,
+        model=model,
+        total_tokens=total_tokens,
+        session_cost_usd=round(total_cost, 4),
+        last_node=latest_latency.node_name if latest_latency else None,
+        last_latency_ms=latest_latency.duration_ms if latest_latency else None,
+        llm_call_count=llm_call_count,
+        active_phase=active_phase,
+        token_budget=100_000,
+        is_recent=is_recent,
+    )
+
+
 @router.post("/projects", response_model=ProjectResponse, status_code=201)
 def create_project(
     body: ProjectCreate,
@@ -362,6 +422,7 @@ def create_project(
         status=project.status.value,
         current_phase=phase_to_int(project.phase.value),
         created_at=project.created_at.isoformat(),
+        updated_at=project.updated_at.isoformat() if project.updated_at else project.created_at.isoformat(),
     )
 
 
