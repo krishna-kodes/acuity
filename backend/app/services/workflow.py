@@ -499,7 +499,7 @@ async def _phase_4_team_node(state: ProjectState) -> dict[str, Any]:
                 if isinstance(parsed, list) and parsed and "name" in parsed[0]:
                     members = parsed
                     break
-            except (_json.JSONDecodeError, (KeyError, IndexError)):
+            except (_json.JSONDecodeError, KeyError, IndexError):
                 pass
 
     required = {t.lower() for t in all_technologies}
