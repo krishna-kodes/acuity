@@ -242,6 +242,20 @@ export default function EpicsPage({ params }: { params: Promise<{ id: string }> 
   const selectedPoints = epics.filter((e) => e.selected).reduce((s, e) => s + e.points, 0);
   const provider       = syncCfg?.provider ?? "github";
 
+  const allSelected = epics.length > 0 && epics.every((e) => e.selected);
+
+  function toggleAll() {
+    const next = !allSelected;
+    setEpics((prev) =>
+      prev.map((e) => ({
+        ...e,
+        selected: next,
+        syncStatus: next ? "pending" : "skipped",
+        tasks: e.tasks.map((t) => ({ ...t, syncStatus: (next ? "pending" : "skipped") as SyncStatus })),
+      }))
+    );
+  }
+
   function toggleEpic(epicId: string) {
     setEpics((prev) =>
       prev.map((e) =>
@@ -321,13 +335,49 @@ export default function EpicsPage({ params }: { params: Promise<{ id: string }> 
               >
                 Configure sync
               </button>
+              <button
+                onClick={handleSync}
+                disabled={syncState === "syncing" || syncState === "done" || selectedCount === 0}
+                className={cn(
+                  "inline-flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors",
+                  syncState === "done"
+                    ? "bg-success-subtle text-success border border-success/20 cursor-default"
+                    : syncState === "syncing" || selectedCount === 0
+                    ? "bg-muted text-text-muted cursor-not-allowed"
+                    : "bg-primary text-primary-foreground hover:bg-accent-hover"
+                )}
+              >
+                {syncState === "syncing" && (
+                  <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 16 16" stroke="currentColor" strokeWidth={2}>
+                    <path d="M8 2a6 6 0 1 0 6 6" strokeLinecap="round" />
+                  </svg>
+                )}
+                {syncState === "done" && (
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 16 16" stroke="currentColor" strokeWidth={2.5}>
+                    <polyline points="2.5,8 6,11.5 13.5,4" />
+                  </svg>
+                )}
+                {syncState === "syncing"
+                  ? `Syncing…`
+                  : syncState === "done"
+                  ? "Synced"
+                  : `Sync to ${providerLabel(provider)}`}
+              </button>
             </div>
           </div>
 
-          {/* Selection summary */}
-          <div className="flex items-center gap-4 text-xs text-text-secondary px-1">
-            <span><strong className="text-foreground tabular-nums">{selectedCount}</strong> of {epics.length} epics selected</span>
-            <span><strong className="text-foreground tabular-nums">{selectedPoints}</strong> story points</span>
+          {/* Selection summary + select all */}
+          <div className="flex items-center justify-between text-xs text-text-secondary px-1">
+            <div className="flex items-center gap-4">
+              <span><strong className="text-foreground tabular-nums">{selectedCount}</strong> of {epics.length} epics selected</span>
+              <span><strong className="text-foreground tabular-nums">{selectedPoints}</strong> story points</span>
+            </div>
+            <button
+              onClick={toggleAll}
+              className="text-xs text-primary hover:text-accent-hover transition-colors font-medium"
+            >
+              {allSelected ? "Deselect all" : "Select all"}
+            </button>
           </div>
 
           {/* Epic list */}
@@ -342,41 +392,13 @@ export default function EpicsPage({ params }: { params: Promise<{ id: string }> 
             <ErrorBanner message={syncError} onRetry={() => { setSyncError(null); setSyncState("idle"); }} />
           )}
 
-          {/* Sync action */}
+          {/* Bottom status bar */}
           <div className="flex items-center justify-between pt-2 border-t border-border flex-wrap gap-3">
             <div className="text-xs text-text-muted">
               {syncState === "done"
                 ? `Sync complete — epics and tasks created in ${providerLabel(provider)}.`
                 : `${selectedCount} epic${selectedCount !== 1 ? "s" : ""} will be synced to ${providerLabel(provider)}.`}
             </div>
-            <button
-              onClick={handleSync}
-              disabled={syncState === "syncing" || syncState === "done" || selectedCount === 0}
-              className={cn(
-                "inline-flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors",
-                syncState === "done"
-                  ? "bg-success-subtle text-success border border-success/20 cursor-default"
-                  : syncState === "syncing" || selectedCount === 0
-                  ? "bg-muted text-text-muted cursor-not-allowed"
-                  : "bg-primary text-primary-foreground hover:bg-accent-hover"
-              )}
-            >
-              {syncState === "syncing" && (
-                <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 16 16" stroke="currentColor" strokeWidth={2}>
-                  <path d="M8 2a6 6 0 1 0 6 6" strokeLinecap="round" />
-                </svg>
-              )}
-              {syncState === "done" && (
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 16 16" stroke="currentColor" strokeWidth={2.5}>
-                  <polyline points="2.5,8 6,11.5 13.5,4" />
-                </svg>
-              )}
-              {syncState === "syncing"
-                ? `Syncing to ${providerLabel(provider)}…`
-                : syncState === "done"
-                ? "Synced"
-                : `Sync to ${providerLabel(provider)}`}
-            </button>
 
             {milestonesUrl && (
               <a
