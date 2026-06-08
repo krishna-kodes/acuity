@@ -112,15 +112,26 @@ function IconDocument() {
     </svg>
   );
 }
+function IconModules() {
+  return (
+    <svg className="w-4 h-4" fill="none" viewBox="0 0 16 16" stroke="currentColor" strokeWidth={1.75}>
+      <rect x="2" y="2" width="5" height="5" rx="1" />
+      <rect x="9" y="2" width="5" height="5" rx="1" />
+      <rect x="2" y="9" width="5" height="5" rx="1" />
+      <path d="M9 11.5h5M11.5 9v5" strokeLinecap="round" />
+    </svg>
+  );
+}
 
 // current_phase is a number from the API; map to route segment
 const PHASE_NUMBER_TO_ROUTE: Record<number, string> = {
   1: "redaction",
   2: "chat",
-  3: "techstack",
-  4: "team",
-  5: "estimation",
-  6: "epics",
+  3: "modules",
+  4: "techstack",
+  5: "team",
+  6: "estimation",
+  7: "epics",
 };
 
 const GLOBAL_NAV = [
@@ -133,12 +144,13 @@ function buildProjectNav(projectId: string) {
     { key: "upload", label: "Upload", href: "/projects/new", icon: <IconUpload />, phase: null },
     { key: "redaction", label: "Redaction Review", href: `${base}/redaction`, icon: <IconShield />, phase: "redaction" },
     { key: "chat", label: "Chat & Refine", href: `${base}/chat`, icon: <IconChat />, phase: "chat" },
+    { key: "modules", label: "Extract Modules", href: `${base}/modules`, icon: <IconModules />, phase: "modules" },
     { key: "tech-stack", label: "Tech Stack", href: `${base}/techstack`, icon: <IconLayers />, phase: "tech-stack" },
     { key: "team", label: "Team", href: `${base}/team`, icon: <IconUsers />, phase: "team" },
     { key: "estimation", label: "Estimation", href: `${base}/estimation`, icon: <IconCalculator />, phase: "estimation" },
     { key: "epics", label: "Epics & Tasks", href: `${base}/epics`, icon: <IconList />, phase: "epics" },
-    { key: "metrics", label: "Metrics", href: `${base}/metrics`, icon: <IconChart />, phase: null },
     { key: "documents", label: "Documents", href: `${base}/documents`, icon: <IconDocument />, phase: null },
+    { key: "metrics", label: "Metrics", href: `${base}/metrics`, icon: <IconChart />, phase: null },
   ];
 }
 
