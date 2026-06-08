@@ -154,7 +154,7 @@ export async function getLiveStatus(projectId: string): Promise<LiveStatus> {
   return res.json()
 }
 
-export async function triggerTeam(projectId: string): Promise<{ members: Array<{ id: number; name: string; seniority: string; availability_pct: number; skills: string[] }>; total: number }> {
+export async function triggerTeam(projectId: string): Promise<{ members: Array<{ id: number; name: string; seniority: string; availability_pct: number; skills: string[]; match_score?: number; active_projects_count?: number }>; total: number }> {
   const res = await fetch(`${_apiBase()}/api/v1/projects/${projectId}/team`, { method: "POST" })
   if (!res.ok) throw new Error(`Team suggestion failed: ${res.status}`)
   return res.json()

@@ -525,6 +525,26 @@ async def _phase_4_team_node(state: ProjectState) -> dict[str, Any]:
         return round(len(skills & required) / len(required), 2)
 
     members = [{**m, "match_score": _match_score(m)} for m in members]
+    members.sort(key=lambda m: m["match_score"], reverse=True)
+
+    from app.models.project import Project as _Project
+    _db = SessionLocal()
+    try:
+        _active_projs = (
+            _db.query(_Project)
+            .filter(_Project.status != "complete", _Project.team_suggestion.isnot(None))
+            .all()
+        )
+        _active_map: dict[int, int] = {}
+        for _p in _active_projs:
+            for _m in (_p.team_suggestion or {}).get("members", []):
+                _eid = _m.get("id")
+                if _eid:
+                    _active_map[_eid] = _active_map.get(_eid, 0) + 1
+    finally:
+        _db.close()
+
+    members = [{**m, "active_projects_count": _active_map.get(m["id"], 0)} for m in members]
 
     record_latency(int(state["project_id"]), "phase_4", "team_node", (_time.monotonic() - _t0) * 1000)
     _p4_inp, _p4_out = 0, 0
