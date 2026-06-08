@@ -135,6 +135,25 @@ export async function getProject(projectId: string): Promise<ProjectDetail> {
   return res.json()
 }
 
+export type LiveStatus = {
+  agent: string | null
+  model: string | null
+  total_tokens: number
+  session_cost_usd: number
+  last_node: string | null
+  last_latency_ms: number | null
+  llm_call_count: number
+  active_phase: string | null
+  token_budget: number
+  is_recent: boolean
+}
+
+export async function getLiveStatus(projectId: string): Promise<LiveStatus> {
+  const res = await fetch(`${_apiBase()}/api/v1/projects/${projectId}/live-status`)
+  if (!res.ok) throw new Error(`Live status failed: ${res.status}`)
+  return res.json()
+}
+
 export async function triggerTeam(projectId: string): Promise<{ members: Array<{ id: number; name: string; seniority: string; availability_pct: number; skills: string[] }>; total: number }> {
   const res = await fetch(`${_apiBase()}/api/v1/projects/${projectId}/team`, { method: "POST" })
   if (!res.ok) throw new Error(`Team suggestion failed: ${res.status}`)

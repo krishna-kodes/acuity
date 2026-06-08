@@ -4,11 +4,13 @@ import { useState, useEffect } from "react";
 import { usePathname } from "next/navigation";
 import { AppSidebar } from "./app-sidebar";
 import { AppTopbar } from "./app-topbar";
+import { LiveStatusBar } from "./live-status-bar";
 import { cn } from "@/lib/utils";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const pathname = usePathname();
+  const projectId = pathname.match(/\/projects\/([^/]+)/)?.[1];
 
   // Close sidebar on route change (mobile nav)
   useEffect(() => {
@@ -39,6 +41,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       {/* Main column */}
       <div className="flex flex-col flex-1 min-w-0">
         <AppTopbar onMenuClick={() => setSidebarOpen((v) => !v)} />
+        {projectId && <LiveStatusBar projectId={projectId} />}
         <main className="flex-1 overflow-y-auto">
           {children}
         </main>
