@@ -976,6 +976,17 @@ async def suggest_stack(
             detail="Phase 3 (modules) must be complete before running tech stack suggestion",
         )
 
+    # Return cached result if tech stack already ran
+    cached = project.tech_stack or {}
+    if cached and project.phase in _POST_STACK_PHASES:
+        return TechStackResponse(
+            frontend=cached.get("frontend", []),
+            backend=cached.get("backend", []),
+            database=cached.get("database", []),
+            infra=cached.get("infra", []),
+            rationale=cached.get("rationale", ""),
+        )
+
     tech_stack: dict = {}
     try:
         from app.services.workflow import run_phase
