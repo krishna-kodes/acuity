@@ -412,6 +412,8 @@ export interface components {
             total_weeks: number | null;
             /** Team Size */
             team_size: number;
+            /** Milestones Url */
+            milestones_url?: string | null;
         };
         /** ProposalResponse */
         ProposalResponse: {

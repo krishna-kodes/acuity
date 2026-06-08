@@ -121,6 +121,7 @@ export default function DashboardPage() {
                   totalWeeks={project.total_weeks}
                   teamSize={project.team_size}
                   moduleCount={project.module_count}
+                  milestonesUrl={project.milestones_url}
                 />
               </Link>
             ))}

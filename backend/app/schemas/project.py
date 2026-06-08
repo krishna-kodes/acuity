@@ -33,6 +33,7 @@ class ProjectResponse(BaseModel):
     tech_preview: list[str] = []
     total_weeks: float | None = None
     team_size: int = 0
+    milestones_url: str | None = None
 
 
 class ProjectDetailResponse(BaseModel):

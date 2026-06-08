@@ -292,6 +292,19 @@ def list_projects(
     db: Session = Depends(get_db),
 ) -> list[ProjectResponse]:
     projects = db.query(Project).order_by(Project.created_at.desc()).all()
+    import re as _re
+
+    def _milestones_url(project_id: int) -> str | None:
+        epic = db.query(Epic).filter(
+            Epic.project_id == project_id,
+            Epic.github_milestone_url.isnot(None),
+        ).first()
+        if epic and epic.github_milestone_url:
+            m = _re.match(r"(https://github\.com/[^/]+/[^/]+)/milestones?/\d+", epic.github_milestone_url)
+            if m:
+                return m.group(1) + "/milestones"
+        return None
+
     return [
         ProjectResponse(
             id=str(p.id),
@@ -305,6 +318,7 @@ def list_projects(
             tech_preview=_tech_preview(p.tech_stack),
             total_weeks=(p.effort_estimates or {}).get("total_weeks"),
             team_size=len((p.team_suggestion or {}).get("members") or []),
+            milestones_url=_milestones_url(p.id),
         )
         for p in projects
     ]
@@ -1428,7 +1442,18 @@ async def sync(
             task_orm.tracker_url = task_dict.get("_tracker_url")
 
     db.commit()
-    return SyncResponse(**result)
+
+    milestones_url: str | None = None
+    for ed in epics_payload:
+        mu = ed.get("_milestone_url", "")
+        if mu:
+            import re as _re
+            m = _re.match(r"(https://github\.com/[^/]+/[^/]+)/milestones?/\d+", mu)
+            if m:
+                milestones_url = m.group(1) + "/milestones"
+            break
+
+    return SyncResponse(**result, milestones_url=milestones_url)
 
 
 @router.get("/projects/{project_id}/sync-config", response_model=SyncConfigResponse)

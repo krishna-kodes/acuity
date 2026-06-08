@@ -31,6 +31,7 @@ class SyncResponse(BaseModel):
     skipped: int
     failed: int
     status: SyncStatus
+    milestones_url: str | None = None
 
 
 class SeedResult(BaseModel):
