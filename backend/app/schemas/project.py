@@ -28,6 +28,11 @@ class ProjectResponse(BaseModel):
     status: str
     current_phase: int
     created_at: str
+    updated_at: str
+    module_count: int = 0
+    tech_preview: list[str] = []
+    total_weeks: float | None = None
+    team_size: int = 0
 
 
 class ProjectDetailResponse(BaseModel):

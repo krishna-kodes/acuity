@@ -9,6 +9,10 @@ export interface ProjectCardProps {
   phase: string;
   updated: string;
   syncStatus?: SyncStatus;
+  techPreview?: string[];
+  totalWeeks?: number | null;
+  teamSize?: number;
+  moduleCount?: number;
   onClick?: () => void;
   className?: string;
 }
@@ -17,6 +21,7 @@ const PHASE_LABELS: Record<string, string> = {
   ingestion: "Ingestion",
   redaction: "Redaction",
   chat: "Refinement",
+  modules: "Modules",
   "tech-stack": "Tech Stack",
   techstack: "Tech Stack",
   team: "Team",
@@ -38,11 +43,16 @@ export function ProjectCard({
   phase,
   updated,
   syncStatus,
+  techPreview = [],
+  totalWeeks,
+  teamSize = 0,
+  moduleCount = 0,
   onClick,
   className,
 }: ProjectCardProps) {
   const phaseLabel = PHASE_LABELS[phase] ?? phase;
   const sync = syncStatus ? SYNC_STYLES[syncStatus] : null;
+  const hasMeta = techPreview.length > 0 || totalWeeks || teamSize > 0 || moduleCount > 0;
 
   return (
     <div
@@ -55,12 +65,30 @@ export function ProjectCard({
         className
       )}
     >
-      {/* Left: name + domain */}
+      {/* Left: name + domain + metadata pills */}
       <div className="flex flex-col gap-0.5 min-w-0">
         <span className="text-sm font-semibold text-foreground truncate group-hover:text-primary transition-colors">
           {name}
         </span>
         <span className="text-xs text-text-secondary">{domain}</span>
+        {hasMeta && (
+          <div className="flex flex-wrap gap-1 mt-0.5">
+            {techPreview.map((t) => (
+              <span key={t} className="text-[10px] bg-surface-subtle border border-border rounded px-1.5 py-0.5 text-text-secondary">
+                {t}
+              </span>
+            ))}
+            {totalWeeks != null && totalWeeks > 0 && (
+              <span className="text-[10px] text-text-muted">{totalWeeks}w est.</span>
+            )}
+            {teamSize > 0 && (
+              <span className="text-[10px] text-text-muted">{teamSize} devs</span>
+            )}
+            {moduleCount > 0 && (
+              <span className="text-[10px] text-text-muted">{moduleCount} modules</span>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Right: phase badge + sync status + updated */}

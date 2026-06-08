@@ -268,6 +268,25 @@ async def _run_proposal_generation(
     return proposal
 
 
+def _tech_preview(ts: dict | None) -> list[str]:
+    if not ts:
+        return []
+    items: list[str] = []
+    for k in ("frontend", "backend", "database", "infra"):
+        items.extend(ts.get(k) or [])
+    return items[:3]
+
+
+def _module_count(modules_json: str | None) -> int:
+    if not modules_json:
+        return 0
+    try:
+        parsed = json.loads(modules_json)
+        return len(parsed) if isinstance(parsed, list) else 0
+    except Exception:
+        return 0
+
+
 @router.get("/projects", response_model=list[ProjectResponse])
 def list_projects(
     db: Session = Depends(get_db),
@@ -281,6 +300,11 @@ def list_projects(
             status=p.status.value,
             current_phase=phase_to_int(p.phase.value),
             created_at=p.created_at.isoformat(),
+            updated_at=p.updated_at.isoformat(),
+            module_count=_module_count(p.modules_json),
+            tech_preview=_tech_preview(p.tech_stack),
+            total_weeks=(p.effort_estimates or {}).get("total_weeks"),
+            team_size=len((p.team_suggestion or {}).get("members") or []),
         )
         for p in projects
     ]
