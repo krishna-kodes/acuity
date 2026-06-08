@@ -16,6 +16,7 @@ export interface TBDItem {
 interface TBDClarificationWidgetProps {
   items: TBDItem[];
   onAction?: (id: string, action: TBDAction) => void;
+  onBulkAction?: (action: TBDAction) => void;
   className?: string;
 }
 
@@ -117,6 +118,7 @@ function TBDItemRow({
 export function TBDClarificationWidget({
   items,
   onAction,
+  onBulkAction,
   className,
 }: TBDClarificationWidgetProps) {
   const resolved = items.filter((i) => i.status !== "open").length;
@@ -124,8 +126,8 @@ export function TBDClarificationWidget({
 
   return (
     <div className={cn("flex flex-col gap-3", className)}>
-      {/* Summary counts */}
-      <div className="flex items-center gap-4 px-1">
+      {/* Summary counts + bulk actions */}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-1">
         <div className="flex items-center gap-1.5">
           <span className="w-2 h-2 rounded-full bg-warning" />
           <span className="text-xs font-medium text-text-secondary">
@@ -138,6 +140,29 @@ export function TBDClarificationWidget({
             {resolved} resolved
           </span>
         </div>
+        {outstanding > 0 && onBulkAction && (
+          <div className="flex items-center gap-1.5 ml-auto">
+            <span className="text-[11px] text-text-muted">All:</span>
+            <button
+              onClick={() => onBulkAction("answered")}
+              className="px-2 py-1 rounded text-[11px] font-medium border border-success/30 bg-success-subtle text-success hover:bg-success hover:text-white transition-colors"
+            >
+              Answer
+            </button>
+            <button
+              onClick={() => onBulkAction("tbd")}
+              className="px-2 py-1 rounded text-[11px] font-medium border border-border bg-surface-subtle text-text-secondary hover:bg-secondary transition-colors"
+            >
+              Keep TBD
+            </button>
+            <button
+              onClick={() => onBulkAction("oos")}
+              className="px-2 py-1 rounded text-[11px] font-medium border border-destructive/30 bg-destructive-subtle text-destructive hover:bg-destructive hover:text-white transition-colors"
+            >
+              Out-of-Scope
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Items */}
