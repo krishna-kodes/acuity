@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, use } from "react";
+import { useState, useEffect, useRef, use } from "react";
 import { PhaseProgressStepper } from "@/components/phase-progress-stepper";
 import { EpicTaskListItem } from "@/components/epic-task-list-item";
 import { SyncStatusBadge } from "@/components/sync-status-badge";
@@ -194,8 +194,11 @@ export default function EpicsPage({ params }: { params: Promise<{ id: string }> 
   const [loading, setLoading]           = useState(true);
   const [syncCfg, setSyncCfg]           = useState<SyncConfigResponse | null>(null);
   const [showConfig, setShowConfig]     = useState(false);
+  const epicsFiredRef = useRef(false);
 
   useEffect(() => {
+    if (epicsFiredRef.current) return;
+    epicsFiredRef.current = true;
     Promise.all([
       getEpics(id),
       getSyncConfig(id),

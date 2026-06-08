@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, use } from "react";
+import { useState, useEffect, useRef, use } from "react";
 import { useRouter } from "next/navigation";
 import { PhaseProgressStepper } from "@/components/phase-progress-stepper";
 import { MetricsStatCard } from "@/components/metrics-stat-card";
@@ -29,8 +29,11 @@ export default function EstimationPage({ params }: { params: Promise<{ id: strin
   const [loading, setLoading] = useState(true);
   const [effort, setEffort] = useState<EffortData | null>(null);
   const [modules, setModules] = useState<Module[]>([]);
+  const estimationFiredRef = useRef(false);
 
   useEffect(() => {
+    if (estimationFiredRef.current) return;
+    estimationFiredRef.current = true;
     let cancelled = false;
     estimateEffort(id)
       .then(({ data }) => {
