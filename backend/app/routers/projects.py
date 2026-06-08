@@ -1390,12 +1390,18 @@ async def sync(
         epics_payload.append(epic_dict)
         epic_task_map.append((epic, task_orms))
 
-    provider, _config, sync_fn = get_sync_fn(project)
+    try:
+        provider, _config, sync_fn = get_sync_fn(project)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Sync configuration error: {exc}") from exc
 
-    if inspect.iscoroutinefunction(sync_fn):
-        result = await sync_fn(epics_payload)
-    else:
-        result = sync_fn(epics_payload)
+    try:
+        if inspect.iscoroutinefunction(sync_fn):
+            result = await sync_fn(epics_payload)
+        else:
+            result = sync_fn(epics_payload)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Sync failed: {exc}") from exc
 
     for i, (epic_orm, task_orms) in enumerate(epic_task_map):
         epic_dict = epics_payload[i]

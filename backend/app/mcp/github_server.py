@@ -63,6 +63,17 @@ def create_github_issue(
 
 
 @mcp.tool
+def list_github_milestones(repo: str) -> list[dict]:
+    """List all milestones (open + closed) for a repo."""
+    url = f"{_GITHUB_API}/repos/{settings.github_owner}/{repo}/milestones"
+    params = {"state": "all", "per_page": "100"}
+    with httpx.Client() as client:
+        resp = client.get(url, params=params, headers=_headers())
+        resp.raise_for_status()
+        return [{"number": m["number"], "title": m["title"], "html_url": m.get("html_url", "")} for m in resp.json()]
+
+
+@mcp.tool
 def get_github_repo_issues(repo: str, milestone: int) -> list[dict]:
     """List all GitHub Issues for a milestone (used to verify sync)."""
     url = f"{_GITHUB_API}/repos/{settings.github_owner}/{repo}/issues"
