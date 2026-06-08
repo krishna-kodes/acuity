@@ -59,10 +59,10 @@ function ThreeDotsMenu({
   }, [open]);
 
   return (
-    <div ref={ref} className="relative shrink-0" onClick={(e) => e.preventDefault()}>
+    <div ref={ref} className="relative" onClick={(e) => e.preventDefault()}>
       <button
         onClick={(e) => { e.stopPropagation(); e.preventDefault(); setOpen((v) => !v); }}
-        className="flex items-center justify-center w-7 h-7 rounded-md text-text-muted hover:bg-surface-subtle hover:text-foreground transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100"
+        className="flex items-center justify-center w-7 h-7 rounded-md text-text-muted hover:bg-surface-subtle hover:text-foreground transition-colors"
         aria-label="Project actions"
       >
         <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 16 16">
@@ -126,7 +126,7 @@ export default function DashboardPage() {
   function renderRow(project: typeof allProjects[number], isArch: boolean) {
     const route = phaseRoute(project.current_phase);
     return (
-      <div key={project.id} className="relative group flex items-center">
+      <div key={project.id} className="flex items-center gap-1 pr-2 border-b border-border last:border-0">
         <Link href={`/projects/${project.id}/${route}`} className="flex-1 min-w-0">
           <ProjectCard
             id={project.id}
@@ -134,17 +134,15 @@ export default function DashboardPage() {
             domain={project.domain ?? ""}
             phase={route}
             updated={timeAgo(project.updated_at)}
-            className={isArch ? "opacity-50" : undefined}
+            className={cn("border-0", isArch ? "opacity-50" : undefined)}
           />
         </Link>
-        <div className="absolute right-3 top-1/2 -translate-y-1/2">
-          <ThreeDotsMenu
-            projectId={project.id}
-            isArchived={isArch}
-            onArchive={(id) => archive.mutate(id)}
-            onUnarchive={(id) => unarchive.mutate(id)}
-          />
-        </div>
+        <ThreeDotsMenu
+          projectId={project.id}
+          isArchived={isArch}
+          onArchive={(id) => archive.mutate(id)}
+          onUnarchive={(id) => unarchive.mutate(id)}
+        />
       </div>
     );
   }
