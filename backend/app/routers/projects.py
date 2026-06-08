@@ -289,9 +289,14 @@ def _module_count(modules_json: str | None) -> int:
 
 @router.get("/projects", response_model=list[ProjectResponse])
 def list_projects(
+    include_archived: bool = False,
     db: Session = Depends(get_db),
 ) -> list[ProjectResponse]:
-    projects = db.query(Project).order_by(Project.created_at.desc()).all()
+    from app.models.enums import ProjectStatus as _PS
+    q = db.query(Project)
+    if not include_archived:
+        q = q.filter(Project.status != _PS.archived)
+    projects = q.order_by(Project.created_at.desc()).all()
     import re as _re
 
     def _milestones_url(project_id: int) -> str | None:
@@ -322,6 +327,28 @@ def list_projects(
         )
         for p in projects
     ]
+
+
+@router.patch("/projects/{project_id}/archive", status_code=204)
+def archive_project(
+    project_id: str,
+    db: Session = Depends(get_db),
+) -> None:
+    from app.models.enums import ProjectStatus as _PS
+    project = _get_project_or_404(project_id, db)
+    project.status = _PS.archived
+    db.commit()
+
+
+@router.patch("/projects/{project_id}/unarchive", status_code=204)
+def unarchive_project(
+    project_id: str,
+    db: Session = Depends(get_db),
+) -> None:
+    from app.models.enums import ProjectStatus as _PS
+    project = _get_project_or_404(project_id, db)
+    project.status = _PS.active
+    db.commit()
 
 
 @router.get("/projects/{project_id}", response_model=ProjectDetailResponse)

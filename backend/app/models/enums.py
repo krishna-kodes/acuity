@@ -5,6 +5,7 @@ class ProjectStatus(str, Enum):
     draft = "draft"
     active = "active"
     complete = "complete"
+    archived = "archived"
 
 
 class ProjectPhase(str, Enum):

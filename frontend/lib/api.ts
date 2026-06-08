@@ -228,6 +228,34 @@ export const deleteProposal = (projectId: string, proposalId: string) =>
     { method: "DELETE" }
   )
 
+// ── Project archive ───────────────────────────────────────────────────────────
+
+export type ProjectListItem = {
+  id: string
+  name: string
+  domain: string | null
+  status: string
+  current_phase: number
+  created_at: string
+  updated_at: string
+}
+
+export async function listAllProjects(): Promise<ProjectListItem[]> {
+  const res = await fetch(`${_apiBase()}/api/v1/projects?include_archived=true`)
+  if (!res.ok) throw new Error(`List projects failed: ${res.status}`)
+  return res.json()
+}
+
+export async function archiveProject(projectId: string): Promise<void> {
+  const res = await fetch(`${_apiBase()}/api/v1/projects/${projectId}/archive`, { method: "PATCH" })
+  if (!res.ok) throw new Error(`Archive failed: ${res.status}`)
+}
+
+export async function unarchiveProject(projectId: string): Promise<void> {
+  const res = await fetch(`${_apiBase()}/api/v1/projects/${projectId}/unarchive`, { method: "PATCH" })
+  if (!res.ok) throw new Error(`Unarchive failed: ${res.status}`)
+}
+
 // ── Admin ──────────────────────────────────────────────────────────────────
 
 export interface AdminSkill {
