@@ -15,9 +15,10 @@
 ## Branch strategy
 
 - `main` — always shippable; direct pushes blocked
-- One branch per task: `feat/epic{N}-task{N}-{slug}`
-- Examples: `feat/epic0-task1-design-tokens`, `feat/epic5-task2-chromadb-ingestion`
+- One branch per task, merged before the next begins: `feat/<slug>` or `feat/epic{N}-task{N}-{slug}`
+- Examples: `feat/modules-backend`, `feat/epic5-task2-chromadb-ingestion`
 - No long-lived branches — tasks should be ≤ 2 days of work
+- Sequential: backend branch → PR → merge → frontend branch → PR → merge
 
 ---
 
