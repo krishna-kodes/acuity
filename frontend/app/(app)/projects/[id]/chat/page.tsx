@@ -202,6 +202,19 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
     });
   }
 
+  function handleBulkTBDAction(action: TBDAction) {
+    const openItems = tbdItems.filter((t) => t.status === "open");
+    if (openItems.length === 0) return;
+    setLocalStatuses((prev) => {
+      const updates: Record<string, TBDAction> = {};
+      openItems.forEach((t) => { updates[t.id] = action; });
+      return { ...prev, ...updates };
+    });
+    Promise.allSettled(
+      openItems.map((t) => submitClarification(projectId, t.id, action))
+    ).catch(() => {});
+  }
+
   async function handleGenerateProposal() {
     setGenerating(true);
     setProposalError(null);
@@ -444,7 +457,7 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
               </div>
 
               <div className="flex-1 overflow-y-auto px-4 py-4">
-                <TBDClarificationWidget items={tbdItems} onAction={handleTBDAction} />
+                <TBDClarificationWidget items={tbdItems} onAction={handleTBDAction} onBulkAction={handleBulkTBDAction} />
               </div>
 
               {/* Generate Proposal */}
