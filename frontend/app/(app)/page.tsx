@@ -238,6 +238,25 @@ export default function DashboardPage() {
         />
       )}
 
+      {/* Page header */}
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-foreground">Projects</h1>
+          <p className="text-sm text-text-secondary mt-1 max-w-lg">
+            Every requirements doc you&apos;ve turned into a synced GitHub backlog. Resume any project from its exact phase.
+          </p>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <Link href="/projects/new"
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-accent-hover transition-colors">
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 14 14" stroke="currentColor" strokeWidth={2.5}>
+              <path d="M7 2v10M2 7h10" strokeLinecap="round" />
+            </svg>
+            New Project
+          </Link>
+        </div>
+      </div>
+
       {/* Stats */}
       <div className="grid grid-cols-3 gap-3">
         <MetricsStatCard label="Total Projects"   value={active.length} />
@@ -247,17 +266,6 @@ export default function DashboardPage() {
 
       {/* Active projects table */}
       <div className="bg-card border border-border rounded-xl overflow-hidden">
-        <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-          <span className="text-xs font-semibold uppercase tracking-wide text-text-muted">Projects</span>
-          <Link href="/projects/new"
-            className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:text-accent-hover transition-colors">
-            <svg className="w-3 h-3" fill="none" viewBox="0 0 12 12" stroke="currentColor" strokeWidth={2.5}>
-              <path d="M6 2v8M2 6h8" strokeLinecap="round" />
-            </svg>
-            New
-          </Link>
-        </div>
-
         {active.length === 0 ? (
           <EmptyState
             title="No projects yet"
