@@ -726,26 +726,33 @@ async def run_phase(project_id: str, state_update: dict | None = None) -> dict:
 
     existing = await wf.aget_state(config)
 
-    if existing.values:
-        # Ensure phase_1 is marked complete in every resume — ingestion is pre-LangGraph
-        existing_ps = dict(existing.values.get("phase_status") or {})
-        merged: dict = {"phase_status": {"phase_1": "complete", **existing_ps}}
-        if state_update:
-            merged.update(state_update)
-            # Re-apply phase_status so state_update doesn't wipe the phase_1 key
-            if "phase_status" in state_update:
-                merged["phase_status"] = {"phase_1": "complete", **state_update["phase_status"]}
+    # Carry-over state from any prior run (including errored ones)
+    existing_vals = existing.values or {}
+    existing_ps = dict(existing_vals.get("phase_status") or {})
+
+    # Build phase_status with phase_1 always set — ingestion is pre-LangGraph
+    safe_ps: dict = {"phase_1": "complete", **existing_ps}
+    if state_update and "phase_status" in state_update:
+        safe_ps = {"phase_1": "complete", **state_update["phase_status"]}
+
+    if existing_vals and existing.next:
+        # Graph is paused at an interrupt — resume in-place
+        merged: dict = {**state_update} if state_update else {}
+        merged["phase_status"] = safe_ps
         await wf.aupdate_state(config, merged)
         result = await wf.ainvoke(None, config=config)
     else:
-        initial: ProjectState = {
-            **_EMPTY_STATE,
-            "project_id": project_id,
-            "phase_status": {"phase_1": "complete"},
-        }
+        # No state or graph ended (error / complete) — fresh run carrying useful context
+        initial: ProjectState = {**_EMPTY_STATE, "project_id": project_id}
+        # Preserve any data already computed in previous phases
+        for key in ("raw_doc_text", "proposal_state", "tbd_items", "tech_stack",
+                    "team_suggestion", "effort_estimates", "epics", "metrics"):
+            if existing_vals.get(key):
+                initial[key] = existing_vals[key]  # type: ignore[literal-required]
+        initial["phase_status"] = safe_ps
         if state_update:
             initial.update(state_update)  # type: ignore[typeddict-item]
-            initial["phase_status"] = {"phase_1": "complete", **initial.get("phase_status", {})}  # type: ignore[typeddict-item]
+            initial["phase_status"] = safe_ps  # never let state_update wipe phase_1
         result = await wf.ainvoke(initial, config=config)
 
     return result or {}
