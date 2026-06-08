@@ -36,6 +36,6 @@ def get_sync_fn(project: Project) -> tuple[SyncProvider, SyncConfigRequest, Call
     from app.services.github_sync import sync_epics_to_github
 
     def github_fn(epics: list[dict]) -> dict:
-        return sync_epics_to_github(epics, config)
+        return sync_epics_to_github(epics, config, project_id=str(project.id))
 
     return provider, config, github_fn

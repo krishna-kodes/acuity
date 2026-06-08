@@ -35,7 +35,7 @@ from app.schemas.sync import SyncConfigRequest, SyncStatus
 logger = logging.getLogger(__name__)
 
 
-def sync_epics_to_github(epics: list[dict], config: SyncConfigRequest) -> dict:
+def sync_epics_to_github(epics: list[dict], config: SyncConfigRequest, project_id: str | None = None) -> dict:
     """Sync a list of epics (with nested tasks) to GitHub.
 
     Returns:
@@ -60,30 +60,33 @@ def sync_epics_to_github(epics: list[dict], config: SyncConfigRequest) -> dict:
     except Exception as exc:
         logger.warning("Could not pre-fetch milestones: %s", exc)
 
+    prefix = f"[P{project_id}] " if project_id else ""
+
     for epic in epics:
         try:
-            existing = existing_milestones.get(epic["title"])
+            milestone_title = f"{prefix}{epic['title']}"
+            existing = existing_milestones.get(milestone_title)
             if existing:
                 milestone_number = existing["number"]
                 milestone_url = existing["html_url"]
-                logger.info("Milestone already exists, reusing: %s (#%d)", epic["title"], milestone_number)
+                logger.info("Milestone already exists, reusing: %s (#%d)", milestone_title, milestone_number)
             else:
                 milestone = create_github_milestone(
                     repo=repo,
-                    title=epic["title"],
+                    title=milestone_title,
                     description=epic.get("description", ""),
                     due_date=epic.get("due_date", ""),
                 )
                 milestone_number = milestone["number"]
                 milestone_url = milestone.get("html_url", "")
-                logger.info("Milestone created: %s (#%d)", epic["title"], milestone_number)
+                logger.info("Milestone created: %s (#%d)", milestone_title, milestone_number)
             epic["_milestone_number"] = milestone_number
             epic["_milestone_url"] = milestone_url
             epic["_tracker_ref"] = f"#{milestone_number}"
             epic["_tracker_url"] = milestone_url
             synced += 1
         except Exception as exc:
-            logger.error("Failed to create milestone '%s': %s", epic["title"], exc)
+            logger.error("Failed to create milestone '%s': %s", milestone_title, exc)
             failed += 1
             skipped += len(epic.get("tasks", []))
             continue
