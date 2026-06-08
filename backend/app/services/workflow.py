@@ -727,13 +727,25 @@ async def run_phase(project_id: str, state_update: dict | None = None) -> dict:
     existing = await wf.aget_state(config)
 
     if existing.values:
+        # Ensure phase_1 is marked complete in every resume — ingestion is pre-LangGraph
+        existing_ps = dict(existing.values.get("phase_status") or {})
+        merged: dict = {"phase_status": {"phase_1": "complete", **existing_ps}}
         if state_update:
-            await wf.aupdate_state(config, state_update)
+            merged.update(state_update)
+            # Re-apply phase_status so state_update doesn't wipe the phase_1 key
+            if "phase_status" in state_update:
+                merged["phase_status"] = {"phase_1": "complete", **state_update["phase_status"]}
+        await wf.aupdate_state(config, merged)
         result = await wf.ainvoke(None, config=config)
     else:
-        initial: ProjectState = {**_EMPTY_STATE, "project_id": project_id}
+        initial: ProjectState = {
+            **_EMPTY_STATE,
+            "project_id": project_id,
+            "phase_status": {"phase_1": "complete"},
+        }
         if state_update:
             initial.update(state_update)  # type: ignore[typeddict-item]
+            initial["phase_status"] = {"phase_1": "complete", **initial.get("phase_status", {})}  # type: ignore[typeddict-item]
         result = await wf.ainvoke(initial, config=config)
 
     return result or {}
