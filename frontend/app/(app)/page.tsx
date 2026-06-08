@@ -116,7 +116,11 @@ export default function DashboardPage() {
                   name={project.name}
                   domain={project.domain ?? ""}
                   phase={phaseRoute(project.current_phase)}
-                  updated={timeAgo(project.created_at)}
+                  updated={timeAgo(project.updated_at)}
+                  techPreview={project.tech_preview}
+                  totalWeeks={project.total_weeks}
+                  teamSize={project.team_size}
+                  moduleCount={project.module_count}
                 />
               </Link>
             ))}

@@ -402,6 +402,16 @@ export interface components {
             current_phase: number;
             /** Created At */
             created_at: string;
+            /** Updated At */
+            updated_at: string;
+            /** Module Count */
+            module_count: number;
+            /** Tech Preview */
+            tech_preview: string[];
+            /** Total Weeks */
+            total_weeks: number | null;
+            /** Team Size */
+            team_size: number;
         };
         /** ProposalResponse */
         ProposalResponse: {
