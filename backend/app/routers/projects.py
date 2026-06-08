@@ -41,7 +41,7 @@ from app.schemas.project import (
 )
 from app.schemas.modules import ModulePatchRequest, ModulesResponse, ModuleOut
 from app.schemas.proposal import ProposalResponse, ProposalRetryRequest, ProposalSectionOut
-from app.schemas.sync import SyncConfigRequest, SyncConfigResponse, SyncProvider, SyncResponse
+from app.schemas.sync import SyncConfigRequest, SyncConfigResponse, SyncProvider, SyncRequest, SyncResponse
 from app.services.ingestion import ingest_document
 from app.services.workflow import get_workflow
 
@@ -1361,6 +1361,7 @@ def get_epics(
 @router.post("/projects/{project_id}/sync", response_model=SyncResponse)
 async def sync(
     project_id: str,
+    body: SyncRequest = SyncRequest(),
     db: Session = Depends(get_db),
 ) -> SyncResponse:
     import inspect
@@ -1370,7 +1371,11 @@ async def sync(
     from app.services.sync_factory import get_sync_fn
 
     project = _get_project_or_404(project_id, db)
-    epics = db.query(Epic).filter(Epic.project_id == int(project_id)).all()
+    all_epics = db.query(Epic).filter(Epic.project_id == int(project_id)).all()
+    if body.epic_ids is not None:
+        epics = [e for e in all_epics if e.id in body.epic_ids]
+    else:
+        epics = all_epics
 
     epics_payload: list[dict] = []
     epic_task_map: list[tuple] = []
