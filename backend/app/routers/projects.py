@@ -31,6 +31,7 @@ from app.schemas.project import (
     ChatRequest,
     EstimationResponse,
     ProjectCreate,
+    ProjectDetailResponse,
     ProjectResponse,
     TBDItem,
     TechStackResponse,
@@ -283,6 +284,37 @@ def list_projects(
         )
         for p in projects
     ]
+
+
+@router.get("/projects/{project_id}", response_model=ProjectDetailResponse)
+def get_project(
+    project_id: str,
+    db: Session = Depends(get_db),
+) -> ProjectDetailResponse:
+    project = _get_project_or_404(project_id, db)
+    summary: str | None = None
+    if project.proposals:
+        latest = max(project.proposals, key=lambda p: p.created_at)
+        if latest.content_json:
+            try:
+                raw = json.loads(latest.content_json)
+                for s in raw.get("sections", []):
+                    if s.get("heading", "").lower().startswith("executive summary"):
+                        body = s.get("body", "").strip()
+                        if body:
+                            summary = body[:250] + "…" if len(body) > 250 else body
+                        break
+            except Exception:
+                pass
+    return ProjectDetailResponse(
+        id=str(project.id),
+        name=project.name,
+        domain=project.domain,
+        status=project.status.value,
+        current_phase=phase_to_int(project.phase.value),
+        created_at=project.created_at.isoformat(),
+        summary=summary,
+    )
 
 
 @router.post("/projects", response_model=ProjectResponse, status_code=201)

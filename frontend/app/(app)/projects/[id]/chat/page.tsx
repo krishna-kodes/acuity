@@ -15,6 +15,7 @@ import {
   retryProposal,
   approveProposal,
   getProposalExportUrl,
+  getProject,
 } from "@/lib/api";
 import type { ProposalData } from "@/lib/api";
 import type { ChatMessage } from "@/components/chat-thread";
@@ -98,6 +99,27 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
       return [makeWelcomeMessage(remoteTbds.length), ...prev.slice(1)];
     });
   }, [remoteTbds]);
+
+  // Fetch project summary and insert as second message (after welcome)
+  useEffect(() => {
+    let cancelled = false;
+    getProject(projectId)
+      .then((project) => {
+        if (cancelled || !project.summary) return;
+        setMessages((prev) => {
+          if (prev.some((m) => m.id === "summary")) return prev;
+          const summaryMsg: ChatMessage = {
+            id: "summary",
+            role: "ai",
+            text: `**Project snapshot:** ${project.summary}`,
+          };
+          return [prev[0], summaryMsg, ...prev.slice(1)];
+        });
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId]);
 
   // Auto-scroll on new messages
   useEffect(() => {

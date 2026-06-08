@@ -119,6 +119,22 @@ export const getProposalExportUrl = (projectId: string): string =>
 
 const _apiBase = () => process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"
 
+export type ProjectDetail = {
+  id: string
+  name: string
+  domain: string | null
+  status: string
+  current_phase: number
+  created_at: string
+  summary: string | null
+}
+
+export async function getProject(projectId: string): Promise<ProjectDetail> {
+  const res = await fetch(`${_apiBase()}/api/v1/projects/${projectId}`)
+  if (!res.ok) throw new Error(`Fetch project failed: ${res.status}`)
+  return res.json()
+}
+
 export async function triggerTeam(projectId: string): Promise<{ members: Array<{ id: number; name: string; seniority: string; availability_pct: number; skills: string[] }>; total: number }> {
   const res = await fetch(`${_apiBase()}/api/v1/projects/${projectId}/team`, { method: "POST" })
   if (!res.ok) throw new Error(`Team suggestion failed: ${res.status}`)
