@@ -39,7 +39,7 @@ export default function EstimationPage({ params }: { params: Promise<{ id: strin
 
   async function runEstimation(isCancelled?: () => boolean, force = false) {
     setGenerating(true);
-    setEstimateStatus("idle");
+    setEstimateStatus("fetching");
     setStreamedEpics([]);
     setSummaryData(null);
     setCompletedCount(0);
