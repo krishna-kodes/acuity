@@ -1,14 +1,26 @@
 "use client";
 
-import { useEffect } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { usePathname } from "next/navigation";
-import { getLiveStatus } from "@/lib/api";
+import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
+
+const _apiBase = () => process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 interface LiveStatusBarProps {
   projectId: string;
   className?: string;
+}
+
+interface LiveStatus {
+  agent: string | null;
+  model: string | null;
+  total_tokens: number;
+  session_cost_usd: number;
+  last_node: string | null;
+  last_latency_ms: number | null;
+  llm_call_count: number;
+  active_phase: string | null;
+  token_budget: number;
+  is_recent: boolean;
 }
 
 function fmt(n: number): string {
@@ -26,24 +38,32 @@ function fmtNode(node: string): string {
 }
 
 export function LiveStatusBar({ projectId, className }: LiveStatusBarProps) {
-  const pathname = usePathname();
+  const [data, setData] = useState<LiveStatus | null>(null);
+  const esRef = useRef<EventSource | null>(null);
 
-  const { data, refetch } = useQuery({
-    queryKey: ["live-status", projectId],
-    queryFn: () => getLiveStatus(projectId),
-    refetchInterval: (query) => {
-      const d = query.state.data;
-      if (!d) return 3_000;
-      return d.is_recent ? 2_000 : 15_000;
-    },
-    staleTime: 0,
-    refetchOnWindowFocus: true,
-  });
-
-  // Immediate refetch on phase navigation (after "Proceed" click)
   useEffect(() => {
-    refetch();
-  }, [pathname]);
+    function connect() {
+      const es = new EventSource(`${_apiBase()}/api/v1/projects/${projectId}/live-status/stream`);
+      esRef.current = es;
+
+      es.onmessage = (e) => {
+        try {
+          setData(JSON.parse(e.data) as LiveStatus);
+        } catch { /* skip malformed frame */ }
+      };
+
+      es.onerror = () => {
+        es.close();
+        // reconnect after 3s backoff
+        setTimeout(connect, 3_000);
+      };
+    }
+
+    connect();
+    return () => {
+      esRef.current?.close();
+    };
+  }, [projectId]);
 
   const tokenPct = data
     ? Math.min((data.total_tokens / (data.token_budget || 100_000)) * 100, 100)
