@@ -387,7 +387,8 @@ export async function generateProposalStream(
   const res = await fetch(`${_apiBase()}/api/v1/projects/${projectId}/proposal/stream`, { method: "POST" })
   if (!res.ok) throw new Error(`Generate failed: ${res.status}`)
 
-  const reader = res.body!.getReader()
+  if (!res.body) throw new Error("Generate proposal stream: response body is null")
+  const reader = res.body.getReader()
   const decoder = new TextDecoder()
   let buffer = ""
 
@@ -433,7 +434,8 @@ export async function retryProposalStream(
   })
   if (!res.ok) throw new Error(`Retry failed: ${res.status}`)
 
-  const reader = res.body!.getReader()
+  if (!res.body) throw new Error("Retry proposal stream: response body is null")
+  const reader = res.body.getReader()
   const decoder = new TextDecoder()
   let buffer = ""
 
@@ -499,7 +501,8 @@ export async function extractModulesStream(
   )
   if (!res.ok) throw new Error(`Extract modules stream failed: ${res.status}`)
 
-  const reader = res.body!.getReader()
+  if (!res.body) throw new Error("Extract modules stream: response body is null")
+  const reader = res.body.getReader()
   const decoder = new TextDecoder()
   let buffer = ""
 

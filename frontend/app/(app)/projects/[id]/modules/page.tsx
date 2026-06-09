@@ -60,12 +60,14 @@ export default function ModulesPage({ params }: { params: Promise<{ id: string }
   type ExtractionStatus = "idle" | "started" | "generating" | "done"
   const [extractionStatus, setExtractionStatus] = useState<ExtractionStatus>("idle")
   const [extractionTotal, setExtractionTotal] = useState(0)
+  const newModuleIdsRef = useRef<Set<string>>(new Set())
 
   async function runExtraction(isCancelled?: () => boolean) {
     setExtracting(true)
     setExtractionStatus("started")
     setModules([])
     setExtractionTotal(0)
+    newModuleIdsRef.current.clear()
     try {
       await extractModulesStream(
         id,
@@ -73,6 +75,7 @@ export default function ModulesPage({ params }: { params: Promise<{ id: string }
           if (!isCancelled?.()) setExtractionStatus(status as ExtractionStatus)
         },
         (module) => {
+          newModuleIdsRef.current.add(module.id)
           if (!isCancelled?.()) {
             setModules((prev) => [...prev, module])
             setExtractionStatus("generating")
@@ -313,7 +316,7 @@ export default function ModulesPage({ params }: { params: Promise<{ id: string }
                           key={m.id}
                           className={cn(
                             "flex items-center gap-3 px-4 py-2.5 group",
-                            extractionStatus === "generating" && "module-row-appear",
+                            newModuleIdsRef.current.has(m.id) && "module-row-appear",
                           )}
                         >
                           {editingId === m.id ? (
