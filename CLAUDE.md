@@ -203,7 +203,9 @@ All routes prefixed `/api/v1/`. OpenAPI spec auto-generated at `/docs`.
 | POST | `/projects/{id}/proposal` | Trigger proposal generation |
 | GET | `/projects/{id}/proposal` | Retrieve generated proposal |
 | POST | `/projects/{id}/proposal/sections/{section_id}/regenerate` | Regenerate single proposal section |
-| POST | `/projects/{id}/stack` | Run tech stack suggestion |
+| GET  | `/projects/{id}/stack` | Get cached tech stack (204 if not generated) |
+| POST | `/projects/{id}/stack` | Run tech stack suggestion (non-streaming) |
+| POST | `/projects/{id}/stack/stream` | Stream tech stack suggestion (SSE: status → category×4 → rationale → done) |
 | POST | `/projects/{id}/estimate` | Run effort estimation |
 | POST | `/projects/{id}/sync` | Sync epics/tasks to GitHub |
 | GET | `/projects/{id}/metrics` | Retrieve project metrics |
