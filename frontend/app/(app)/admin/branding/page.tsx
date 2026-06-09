@@ -168,7 +168,7 @@ export default function BrandingPage() {
               type="button"
               onClick={() => saveMutation.mutate(form)}
               disabled={busy}
-              className="px-4 py-2 text-sm font-medium bg-accent text-white rounded-lg hover:bg-accent/90 disabled:opacity-50 transition-colors"
+              className="px-4 py-2 text-sm font-medium bg-primary text-primary-foreground rounded-lg hover:bg-accent-hover disabled:opacity-50 transition-colors"
             >
               {saveMutation.isPending ? "Saving…" : "Save Branding"}
             </button>
