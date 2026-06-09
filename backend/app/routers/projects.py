@@ -1053,6 +1053,7 @@ async def extract_modules_stream(
         yield f'data: {json.dumps({"type": "status", "status": "started"})}\n\n'
 
         buffer = ""
+        full_buffer = ""
         seen_ids: set[str] = set()
         modules: list[dict] = []
 
@@ -1061,6 +1062,7 @@ async def extract_modules_stream(
                 async for chunk in llm.astream(prompt):
                     token = chunk.content if hasattr(chunk, "content") else str(chunk)
                     buffer += token
+                    full_buffer += token
                     matches = list(re.finditer(r'\{[^{}]+\}', buffer))
                     for match in matches:
                         try:
@@ -1081,11 +1083,32 @@ async def extract_modules_stream(
                             pass
                     if matches:
                         buffer = buffer[matches[-1].end():]
+
+            # Fallback: parse full buffer to catch modules regex missed (e.g. full JSON in one chunk)
+            if full_buffer.strip():
+                try:
+                    cleaned = re.sub(r"```(?:json)?\s*", "", full_buffer).strip().rstrip("`").strip()
+                    parsed = json.loads(cleaned)
+                    for m in parsed.get("modules", []):
+                        if m.get("title") and m.get("label"):
+                            mid = m.get("id") or str(_uuid.uuid4())
+                            if mid not in seen_ids:
+                                seen_ids.add(mid)
+                                module = {
+                                    "id": mid,
+                                    "title": str(m["title"]),
+                                    "label": str(m.get("label", "backend")),
+                                    "description": str(m.get("description", "")),
+                                }
+                                modules.append(module)
+                                yield f'data: {json.dumps({"type": "module", "module": module})}\n\n'
+                except Exception:
+                    pass
+
+            yield f'data: {json.dumps({"type": "done", "modules": modules, "count": len(modules)})}\n\n'
         finally:
             project.modules_json = json.dumps(modules)
             db.commit()
-
-        yield f'data: {json.dumps({"type": "done", "modules": modules, "count": len(modules)})}\n\n'
 
     return StreamingResponse(
         _generate(),
