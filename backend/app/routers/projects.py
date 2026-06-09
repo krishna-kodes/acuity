@@ -9,7 +9,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Re
 from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
-from app.database import get_db
+from app.database import SessionLocal, get_db
 from app.models.enums import (
     DocumentStatus,
     ProjectPhase,
@@ -1573,8 +1573,13 @@ async def suggest_stack_stream(
 
     prompt = (
         f"Given this project proposal:\n{proposal_summary}\n\n"
-        f"Select the most appropriate technologies from this approved list:\n{tech_descriptions}\n\n"
-        "Choose 1-3 per category. Respond ONLY with valid JSON:\n"
+        "Select technologies ONLY from the approved list below. "
+        "Do not suggest any technology not present in this list. Use EXACT names as written.\n\n"
+        f"{tech_descriptions}\n\n"
+        "Choose 1-3 per category (frontend, backend, database, infra). "
+        "Use the tags to match project needs — e.g. prefer 'prototyping' tags for MVPs, "
+        "'high-scale' for enterprise. "
+        "Respond ONLY with valid JSON (no markdown, no explanation outside the JSON):\n"
         '{"frontend": [...], "backend": [...], "database": [...], "infra": [...], "rationale": "..."}'
     )
 
@@ -1642,8 +1647,11 @@ async def suggest_stack_stream(
 
         finally:
             if tech_stack:
-                project.tech_stack = tech_stack
-                db.commit()
+                with SessionLocal() as _db:
+                    _proj = _db.query(Project).filter(Project.id == int(project_id)).first()
+                    if _proj:
+                        _proj.tech_stack = tech_stack
+                        _db.commit()
 
     return StreamingResponse(
         _generate(),
@@ -1665,17 +1673,22 @@ async def suggest_team(
             detail="Phase 3 (tech stack suggestion) must be complete before running team suggestion",
         )
 
-    # Return cached result if team already ran — prevents re-running LLM on phase revisit
+    # Return cached result only when AI already ran with a real tech stack.
+    # A cached result with technologies=[] means AI ran with empty tech stack —
+    # don't trust it; re-run with the correct data.
     cached = project.team_suggestion or {}
-    if cached and project.phase in _POST_TEAM_PHASES:
+    has_valid_cache = bool(cached.get("technologies")) and project.phase in _POST_TEAM_PHASES
+    if has_valid_cache:
         members = cached.get("members", [])
         return TeamResponse(members=members, total=len(members))
 
-    team: dict = {}
+    # Bypass run_phase: phase 3 is often run via the streaming endpoint which
+    # saves to project.tech_stack (app.db) but NOT to the LangGraph checkpoint.
+    # run_phase always starts fresh at phase 2 chat and never reaches phase 4.
+    # We call _suggest_team_direct instead to skip LangGraph entirely.
     try:
-        from app.services.workflow import run_phase
-        state = await run_phase(str(project.id))
-        team = state.get("team_suggestion") or {}
+        from app.services.workflow import suggest_team_direct
+        team = suggest_team_direct(project.tech_stack or {})
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Team suggestion failed: {exc}") from exc
 
@@ -1953,16 +1966,19 @@ async def estimate_effort_stream(
         finally:
             if epics or total_points:
                 breakdown_dict = {e["title"]: e["estimated_points"] for e in epics}
-                project.effort_estimates = {
-                    "total_weeks": total_weeks,
-                    "total_points": total_points,
-                    "confidence": confidence,
-                    "breakdown": breakdown_dict,
-                    "reasoning": reasoning,
-                }
-                if project.phase == ProjectPhase.team:
-                    project.phase = ProjectPhase.estimation
-                db.commit()
+                with SessionLocal() as _db:
+                    _proj = _db.query(Project).filter(Project.id == int(project_id)).first()
+                    if _proj:
+                        _proj.effort_estimates = {
+                            "total_weeks": total_weeks,
+                            "total_points": total_points,
+                            "confidence": confidence,
+                            "breakdown": breakdown_dict,
+                            "reasoning": reasoning,
+                        }
+                        if _proj.phase == ProjectPhase.team:
+                            _proj.phase = ProjectPhase.estimation
+                        _db.commit()
 
     return StreamingResponse(
         _generate(),
@@ -2216,45 +2232,47 @@ async def stream_epics(
 
         # ── Persist BEFORE done event so getEpics() works immediately ───────
         if epics:
-            if force:
-                old_ids = [
-                    row[0]
-                    for row in db.query(Epic.id).filter(Epic.project_id == int(project_id)).all()
-                ]
-                if old_ids:
-                    db.query(Task).filter(Task.epic_id.in_(old_ids)).delete(
-                        synchronize_session=False
-                    )
-                    db.query(Epic).filter(Epic.project_id == int(project_id)).delete(
-                        synchronize_session=False
-                    )
-                    db.flush()
-
-            for epic_dict in epics:
-                epic_orm = Epic(
-                    project_id=int(project_id),
-                    title=epic_dict["title"],
-                    description=epic_dict.get("description", ""),
-                    sync_status="pending",
-                )
-                db.add(epic_orm)
-                db.flush()
-                for task_dict in epic_dict.get("tasks", []):
-                    db.add(
-                        Task(
-                            epic_id=epic_orm.id,
-                            title=task_dict.get("title", ""),
-                            description=task_dict.get("description", ""),
-                            estimated_points=task_dict.get("story_points", 3),
-                            labels=json.dumps(task_dict.get("labels", [])),
-                            sync_status="pending",
+            with SessionLocal() as _db:
+                if force:
+                    old_ids = [
+                        row[0]
+                        for row in _db.query(Epic.id).filter(Epic.project_id == int(project_id)).all()
+                    ]
+                    if old_ids:
+                        _db.query(Task).filter(Task.epic_id.in_(old_ids)).delete(
+                            synchronize_session=False
                         )
-                    )
-            db.commit()
+                        _db.query(Epic).filter(Epic.project_id == int(project_id)).delete(
+                            synchronize_session=False
+                        )
+                        _db.flush()
 
-            if project.phase == ProjectPhase.estimation:
-                project.phase = ProjectPhase.epics
-                db.commit()
+                for epic_dict in epics:
+                    epic_orm = Epic(
+                        project_id=int(project_id),
+                        title=epic_dict["title"],
+                        description=epic_dict.get("description", ""),
+                        sync_status="pending",
+                    )
+                    _db.add(epic_orm)
+                    _db.flush()
+                    for task_dict in epic_dict.get("tasks", []):
+                        _db.add(
+                            Task(
+                                epic_id=epic_orm.id,
+                                title=task_dict.get("title", ""),
+                                description=task_dict.get("description", ""),
+                                estimated_points=task_dict.get("story_points", 3),
+                                labels=json.dumps(task_dict.get("labels", [])),
+                                sync_status="pending",
+                            )
+                        )
+                _db.commit()
+
+                _proj = _db.query(Project).filter(Project.id == int(project_id)).first()
+                if _proj and _proj.phase == ProjectPhase.estimation:
+                    _proj.phase = ProjectPhase.epics
+                    _db.commit()
 
         yield f'data: {json.dumps({"type": "done", "count": len(epics)})}\n\n'
 
