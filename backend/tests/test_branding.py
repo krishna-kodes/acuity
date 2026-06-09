@@ -150,3 +150,60 @@ def test_put_branding_rejects_invalid_hex(api_client):
         json={"primary_color": "not-a-color"},
     )
     assert resp.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Exporter tests
+# ---------------------------------------------------------------------------
+
+import os
+import tempfile
+from docx import Document as DocxDocument
+from app.services.exporter import (
+    ProposalContent,
+    ProposalSection,
+    _hex_to_rgb,
+    _style_table_header,
+    generate_proposal_docx,
+)
+from app.schemas.branding import BrandingSettingsResponse
+from datetime import datetime as dt
+
+
+def test_hex_to_rgb_converts_correctly():
+    rgb = _hex_to_rgb("#FF5500")
+    assert rgb[0] == 0xFF
+    assert rgb[1] == 0x55
+    assert rgb[2] == 0x00
+
+
+def test_hex_to_rgb_works_without_hash():
+    rgb = _hex_to_rgb("2E5FA3")
+    assert rgb[0] == 0x2E
+    assert rgb[1] == 0x5F
+    assert rgb[2] == 0xA3
+
+
+def test_generate_proposal_docx_with_branding_does_not_raise(tmp_path):
+    content = ProposalContent(
+        title="Test Project",
+        sections=[ProposalSection(heading="Overview", body="Some overview text.")],
+    )
+    branding = BrandingSettingsResponse(
+        company_name="Acme Inc",
+        primary_color="#FF5500",
+        secondary_color="#003366",
+        prepared_by="Alice",
+        updated_at=dt(2026, 6, 9),
+    )
+    path = generate_proposal_docx(1, content, output_dir=str(tmp_path), branding=branding)
+    assert os.path.exists(path)
+
+
+def test_generate_proposal_docx_without_branding_unchanged(tmp_path):
+    content = ProposalContent(
+        title="No Brand",
+        sections=[ProposalSection(heading="Section", body="Body text.")],
+    )
+    path = generate_proposal_docx(2, content, output_dir=str(tmp_path))
+    assert os.path.exists(path)
