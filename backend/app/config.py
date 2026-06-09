@@ -19,6 +19,11 @@ class Settings(BaseSettings):
     jira_username: str = ""
     jira_api_token: str = ""
     jira_project_key: str = ""
+    # Branding defaults (overridden by DB row in branding_settings)
+    branding_company_name: str = ""
+    branding_primary_color: str = "#2E5FA3"
+    branding_secondary_color: str = "#1A3A6B"
+    branding_prepared_by: str = ""
     embedding_dimensions: int = 1536
     chroma_persist_path: str = "./chroma_db"
     pii_encryption_key: str = ""

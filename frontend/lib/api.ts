@@ -319,12 +319,46 @@ export async function updateTeam(
 
 export type ProposalSection = { heading: string; body: string }
 
+export type SectionStatus = "generated" | "draft" | "failed"
+
+export type RiskItem = { risk: string; mitigation: string }
+export type PersonaItem = { name: string; role: string; needs: string }
+export type FeatureItem = { title: string; description: string; in_scope: boolean }
+
+export type StructuredSection = {
+  section_id: string
+  title: string
+  status: SectionStatus
+  generated_at: string
+  content: string
+  items?: (RiskItem | PersonaItem | FeatureItem | Record<string, string>)[] | null
+}
+
 export type ProposalData = {
   id: string
   project_id: string
   content_path: string
   created_at: string
   sections: ProposalSection[]
+  structured_sections?: StructuredSection[] | null
+  template_version?: string | null
+}
+
+export async function regenerateSection(
+  projectId: string,
+  sectionId: string,
+  additionalContext?: string,
+): Promise<{ data: StructuredSection | null; error: unknown }> {
+  const res = await fetch(
+    `${_apiBase()}/api/v1/projects/${projectId}/proposal/sections/${sectionId}/regenerate`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ additional_context: additionalContext ?? "" }),
+    },
+  )
+  if (!res.ok) return { data: null, error: await res.json() }
+  return { data: await res.json(), error: null }
 }
 
 export async function generateProposalRaw(projectId: string): Promise<ProposalData> {
@@ -394,4 +428,35 @@ export async function approveModules(projectId: string): Promise<ModulesData> {
   const res = await fetch(`${_apiBase()}/api/v1/projects/${projectId}/modules/approve`, { method: "POST" })
   if (!res.ok) throw new Error(`Approve modules failed: ${res.status}`)
   return res.json()
+}
+
+// ── Branding ─────────────────────────────────────────────────────────────────
+
+export interface BrandingSettings {
+  company_name: string;
+  primary_color: string;
+  secondary_color: string;
+  prepared_by: string;
+  updated_at: string | null;
+}
+
+export async function getBranding(): Promise<BrandingSettings> {
+  const res = await fetch(`${_apiBase()}/api/v1/admin/branding`);
+  if (!res.ok) throw new Error(`Failed to fetch branding: ${res.status}`);
+  return res.json();
+}
+
+export async function updateBranding(
+  data: Partial<Omit<BrandingSettings, "updated_at">>
+): Promise<BrandingSettings> {
+  const res = await fetch(`${_apiBase()}/api/v1/admin/branding`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const detail = await res.json().catch(() => ({}));
+    throw new Error(detail?.detail ?? `Failed to update branding: ${res.status}`);
+  }
+  return res.json();
 }

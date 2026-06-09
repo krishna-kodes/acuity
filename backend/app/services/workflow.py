@@ -47,6 +47,7 @@ class ProjectState(TypedDict):
     phase_status: dict  # {"phase_1": "complete", "phase_2": "in_progress", ...}
     chat_messages: list          # NEW: list of {"role": str, "content": str}
     chat_proceed: bool           # NEW: set True by PM to exit chat loop
+    proposal_sections: dict           # keyed by ProposalSectionId str → section dict
     groundedness_score: float | None  # last groundedness check score
     gate_status: str | None           # "pass" | "low_confidence" | "no_results" | "provenance_mismatch"
     gate_message: str | None          # human-readable gate message when status != "pass"
@@ -67,6 +68,7 @@ _EMPTY_STATE: ProjectState = {
     "phase_status": {},
     "chat_messages": [],
     "chat_proceed": False,
+    "proposal_sections": {},
     "groundedness_score": None,
     "gate_status": None,
     "gate_message": None,
@@ -263,6 +265,7 @@ async def _phase_2_init_node(state: ProjectState) -> dict[str, Any]:
         "phase_status": ps,
         "chat_messages": existing_messages if existing_messages else [],
         "chat_proceed": state.get("chat_proceed", False),
+        "proposal_sections": state.get("proposal_sections") or {},
     }
 
 

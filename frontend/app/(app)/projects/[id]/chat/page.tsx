@@ -14,13 +14,164 @@ import {
   generateProposalRaw,
   retryProposal,
   approveProposal,
+  regenerateSection,
   getProposalExportUrl,
   getProject,
 } from "@/lib/api";
-import type { ProposalData } from "@/lib/api";
+import type { ProposalData, StructuredSection, SectionStatus, RiskItem, PersonaItem, FeatureItem } from "@/lib/api";
 import type { ChatMessage } from "@/components/chat-thread";
 import type { TBDItem, TBDAction } from "@/components/tbd-clarification-widget";
 import { cn } from "@/lib/utils";
+
+// ── Structured proposal accordion components ─────────────────────────────────
+
+function StatusBadge({ status }: { status: SectionStatus }) {
+  const cls =
+    status === "generated"
+      ? "bg-success-subtle text-success"
+      : status === "draft"
+        ? "bg-warning-subtle text-warning"
+        : "bg-destructive-subtle text-destructive"
+  return (
+    <span className={cn("text-[10px] font-medium px-2 py-0.5 rounded-full", cls)}>
+      {status}
+    </span>
+  )
+}
+
+function RisksTable({ items }: { items: RiskItem[] }) {
+  return (
+    <div className="divide-y divide-border">
+      <div className="grid grid-cols-2 gap-3 px-4 py-2 bg-surface-subtle/30 text-[10px] font-semibold uppercase tracking-wide text-text-muted">
+        <span>Risk</span>
+        <span>Mitigation</span>
+      </div>
+      {items.map((r, i) => (
+        <div key={i} className="grid grid-cols-2 gap-3 px-4 py-2 text-xs">
+          <span className="text-destructive">{r.risk}</span>
+          <span className="text-success">{r.mitigation}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function PersonaCards({ items }: { items: PersonaItem[] }) {
+  return (
+    <div className="flex flex-wrap gap-2 p-4">
+      {items.map((p, i) => (
+        <div key={i} className="p-3 rounded-lg border border-border bg-surface-subtle text-xs min-w-[140px]">
+          <div className="font-semibold text-foreground">{p.name}</div>
+          <div className="text-text-muted mt-0.5">{p.role}</div>
+          <div className="text-foreground mt-1">{p.needs}</div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function FeaturesTable({ items }: { items: FeatureItem[] }) {
+  return (
+    <div className="divide-y divide-border">
+      {items.map((f, i) => (
+        <div key={i} className="flex items-start gap-3 px-4 py-2 text-xs">
+          <span className={cn("font-mono shrink-0 mt-0.5", f.in_scope ? "text-success" : "text-text-muted")}>
+            {f.in_scope ? "IN" : "OUT"}
+          </span>
+          <div>
+            <div className="font-medium text-foreground">{f.title}</div>
+            <div className="text-text-muted mt-0.5">{f.description}</div>
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function ProposalAccordion({
+  sections,
+  projectId,
+  onSectionUpdate,
+}: {
+  sections: StructuredSection[]
+  projectId: string
+  onSectionUpdate: (updated: StructuredSection) => void
+}) {
+  const [open, setOpen] = useState<Record<string, boolean>>({})
+  const [regenerating, setRegenerating] = useState<Record<string, boolean>>({})
+
+  async function handleRegen(sectionId: string) {
+    setRegenerating((p) => ({ ...p, [sectionId]: true }))
+    const { data } = await regenerateSection(projectId, sectionId)
+    if (data) onSectionUpdate(data)
+    setRegenerating((p) => ({ ...p, [sectionId]: false }))
+  }
+
+  return (
+    <div className="divide-y divide-border rounded-xl border border-border overflow-hidden">
+      {sections.map((s) => (
+        <div key={s.section_id}>
+          <div
+            className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-surface-subtle/50 select-none"
+            onClick={() => setOpen((p) => ({ ...p, [s.section_id]: !p[s.section_id] }))}
+          >
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="text-xs font-medium text-foreground truncate">{s.title}</span>
+              <StatusBadge status={s.status} />
+            </div>
+            <div className="flex items-center gap-2 shrink-0 ml-2" onClick={(e) => e.stopPropagation()}>
+              {s.section_id !== "open_questions" && (
+                <button
+                  disabled={regenerating[s.section_id]}
+                  onClick={() => handleRegen(s.section_id)}
+                  className="text-[10px] text-text-muted hover:text-foreground px-1.5 py-0.5 rounded border border-border transition-colors disabled:opacity-50"
+                >
+                  {regenerating[s.section_id] ? "…" : "Regenerate"}
+                </button>
+              )}
+              <svg
+                className={cn("w-3 h-3 text-text-muted transition-transform", open[s.section_id] && "rotate-180")}
+                fill="none"
+                viewBox="0 0 12 12"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
+                <path d="M2 4l4 4 4-4" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </div>
+          </div>
+
+          {open[s.section_id] && (
+            <div className="border-t border-border">
+              {s.status === "draft" && (
+                <p className="px-4 py-2 text-[10px] text-warning italic border-b border-border bg-warning-subtle/20">
+                  Generated from requirements — update after Phase 3/5 completes
+                </p>
+              )}
+              {s.status === "failed" ? (
+                <div className="px-4 py-3 text-xs text-destructive">
+                  Section generation failed. Use Regenerate to retry.
+                </div>
+              ) : s.section_id === "risks_and_mitigations" && s.items?.length ? (
+                <RisksTable items={s.items as RiskItem[]} />
+              ) : s.section_id === "target_audience" && s.items?.length ? (
+                <PersonaCards items={s.items as PersonaItem[]} />
+              ) : s.section_id === "key_features" && s.items?.length ? (
+                <FeaturesTable items={s.items as FeatureItem[]} />
+              ) : (
+                <p className="px-4 py-3 text-xs text-foreground whitespace-pre-wrap leading-relaxed">
+                  {s.content}
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// ── Chat page ─────────────────────────────────────────────────────────────────
 
 function makeWelcomeMessage(tbdCount: number): ChatMessage {
   const now = new Date();
@@ -397,7 +548,24 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
                 <p className="text-[11px] font-semibold text-foreground uppercase tracking-wide">
                   Generated Proposal
                 </p>
-                {proposalData.sections.length === 0 ? (
+                {proposalData.structured_sections?.length ? (
+                  <ProposalAccordion
+                    sections={proposalData.structured_sections}
+                    projectId={projectId}
+                    onSectionUpdate={(updated) => {
+                      setProposalData((p) =>
+                        p
+                          ? {
+                              ...p,
+                              structured_sections: p.structured_sections?.map((s) =>
+                                s.section_id === updated.section_id ? updated : s,
+                              ),
+                            }
+                          : p,
+                      )
+                    }}
+                  />
+                ) : proposalData.sections.length === 0 ? (
                   <p className="text-xs text-text-muted">No sections found in proposal.</p>
                 ) : (
                   proposalData.sections.map((section, i) => (

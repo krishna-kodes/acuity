@@ -291,6 +291,13 @@ function ProfileMenu() {
           >
             Administration
           </Link>
+          <Link
+            href="/admin/branding"
+            onClick={() => setOpen(false)}
+            className="block px-3 py-2 text-sm text-foreground hover:bg-surface-subtle transition-colors pl-6"
+          >
+            Branding
+          </Link>
           <div className="border-t border-border" />
           <button
             className="w-full text-left px-3 py-2 text-sm text-destructive hover:bg-surface-subtle transition-colors"
