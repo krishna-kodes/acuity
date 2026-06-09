@@ -141,7 +141,7 @@ async def test_phase_3_stack_node_returns_tech_stack():
     result = await _phase_3_stack_node(state)
     assert "tech_stack" in result
     assert "frontend" in result["tech_stack"]
-    assert result["phase_status"]["phase_3"] == "in_progress"
+    assert result["phase_status"]["phase_3"] == "complete"
 
 
 @pytest.mark.asyncio
@@ -149,6 +149,38 @@ async def test_phase_3_stack_node_raises_when_phase_2_incomplete():
     state: ProjectState = {**_EMPTY_STATE, "phase_status": {"phase_1": "complete"}}
     with pytest.raises(ValueError, match="Phase 2 must be complete"):
         await _phase_3_stack_node(state)
+
+
+@pytest.mark.asyncio
+async def test_phase_3_stack_node_logs_error_on_llm_failure(db_session, project_id):
+    from unittest.mock import patch
+    from app.models.observability import ErrorLog
+    from app.database import SessionLocal
+
+    state: ProjectState = {
+        **_EMPTY_STATE,
+        "project_id": project_id,
+        "phase_status": {"phase_1": "complete", "phase_2": "complete"},
+    }
+
+    with patch("app.services.workflow.get_llm") as mock_llm:
+        mock_llm.return_value.with_structured_output.side_effect = RuntimeError("API key invalid")
+        result = await _phase_3_stack_node(state)
+
+    # Fallback stack returned
+    assert result["tech_stack"]["frontend"] == ["Next.js"]
+    assert result["phase_status"]["phase_3"] == "complete"
+
+    # Error logged to DB
+    db = SessionLocal()
+    try:
+        log = db.query(ErrorLog).filter_by(
+            project_id=int(project_id), phase="phase_3"
+        ).first()
+        assert log is not None
+        assert log.error_type == "RuntimeError"
+    finally:
+        db.close()
 
 
 # ---------------------------------------------------------------------------

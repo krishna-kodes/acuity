@@ -27,7 +27,7 @@ from app.models.employee import Employee, EmployeeSkill, Skill
 from app.models.reference import ApprovedTechnology, HistoricalProject
 from app.services.llm_factory import get_llm
 from app.services.rag import retrieve
-from app.services.metrics_tracker import calc_cost, record_latency, record_quality, record_retrieval, record_tokens
+from app.services.metrics_tracker import calc_cost, record_error, record_latency, record_quality, record_retrieval, record_tokens
 from app.services.tbd_detection import detect_tbds, persist_tbds
 
 # ---------------------------------------------------------------------------
@@ -502,8 +502,13 @@ async def _phase_3_stack_node(state: ProjectState) -> dict[str, Any]:
         _t0 = _time.monotonic()
         _raw_result = _llm_raw.invoke(
             f"Given this project proposal:\n{proposal_summary}\n\n"
-            f"Select the most appropriate technologies from this approved list:\n{tech_descriptions}\n\n"
-            "Choose 1-3 per category. Return frontend, backend, database, infra lists and a brief rationale."
+            "Select technologies ONLY from the approved list below. "
+            "Do not suggest any technology not present in this list. Use EXACT names as written.\n\n"
+            f"{tech_descriptions}\n\n"
+            "Choose 1-3 per category (frontend, backend, database, infra). "
+            "Use the tags to match project needs — e.g. prefer 'prototyping' tags for MVPs, "
+            "'high-scale' for enterprise. Return your selections and a brief rationale "
+            "explaining why each choice fits this project."
         )
         record_latency(int(state["project_id"]), "phase_3", "tech_stack_node", (_time.monotonic() - _t0) * 1000)
         result = _raw_result.get("parsed") or _raw_result
@@ -515,14 +520,17 @@ async def _phase_3_stack_node(state: ProjectState) -> dict[str, Any]:
             record_tokens(int(state["project_id"]), "phase_3", _s.main_llm_model, _inp, _out, calc_cost(_inp, _out))
         tech_stack = result.model_dump() if hasattr(result, "model_dump") else _FALLBACK_STACK
         ps["phase_3"] = "complete"
-    except Exception:
+    except Exception as exc:
+        _pid = int(state["project_id"]) if state.get("project_id") else 0
+        record_error(_pid, "phase_3", type(exc).__name__, str(exc))
         tech_stack = _FALLBACK_STACK
+        ps["phase_3"] = "complete"
 
     return {"phase_status": ps, "tech_stack": tech_stack}
 
 
 async def _phase_4_team_node(state: ProjectState) -> dict[str, Any]:
-    """Phase 4: Team suggestion — ReAct agent queries employee skills."""
+    """Phase 4: Team suggestion — queries employees by tech stack skills."""
     import time as _time
     _require_phase_complete(state, 4)
 
@@ -532,34 +540,36 @@ async def _phase_4_team_node(state: ProjectState) -> dict[str, Any]:
         tech_stack.get("database", []) + tech_stack.get("infra", [])
     )
 
-    agent = create_react_agent(get_llm(), _PHASE_4_TOOLS)
     _t0 = _time.monotonic()
-    agent_result = await agent.ainvoke(
-        {
-            "messages": [
-                {
-                    "role": "user",
-                    "content": (
-                        f"Find employees for a project using these technologies: {all_technologies}. "
-                        "Use the get_employees tool to query the database. "
-                        "Return the list of suitable team members."
-                    ),
-                }
-            ]
-        }
-    )
 
-    # Extract employee data from tool call results
-    members = []
-    for msg in agent_result.get("messages", []):
-        if hasattr(msg, "content") and isinstance(msg.content, str):
-            try:
-                parsed = _json.loads(msg.content)
-                if isinstance(parsed, list) and parsed and "name" in parsed[0]:
-                    members = parsed
-                    break
-            except (_json.JSONDecodeError, KeyError, IndexError):
-                pass
+    # Direct DB query is reliable; the previous LLM agent approach failed when
+    # all_technologies was empty (agent wouldn't call the tool) and message
+    # extraction was fragile (JSON parse of Python repr strings).
+    if all_technologies:
+        members: list[dict] = get_employees.func(all_technologies)
+    else:
+        # No tech stack — return all employees so user can pick manually
+        from sqlalchemy.orm import joinedload as _jl
+        _db2 = SessionLocal()
+        try:
+            _all_emps = (
+                _db2.query(Employee)
+                .options(_jl(Employee.employee_skills).joinedload(EmployeeSkill.skill))
+                .order_by(Employee.name)
+                .all()
+            )
+            members = [
+                {
+                    "id": e.id,
+                    "name": e.name,
+                    "seniority": e.seniority,
+                    "availability_pct": e.availability_pct,
+                    "skills": [es.skill.name for es in e.employee_skills],
+                }
+                for e in _all_emps
+            ]
+        finally:
+            _db2.close()
 
     required = {t.lower() for t in all_technologies}
 
@@ -592,20 +602,81 @@ async def _phase_4_team_node(state: ProjectState) -> dict[str, Any]:
     members = [{**m, "active_projects_count": _active_map.get(m["id"], 0)} for m in members]
 
     record_latency(int(state["project_id"]), "phase_4", "team_node", (_time.monotonic() - _t0) * 1000)
-    _p4_inp, _p4_out = 0, 0
-    for _msg in agent_result.get("messages", []):
-        if hasattr(_msg, "usage_metadata") and _msg.usage_metadata:
-            _p4_inp += _msg.usage_metadata.get("input_tokens", 0)
-            _p4_out += _msg.usage_metadata.get("output_tokens", 0)
-    if _p4_inp + _p4_out > 0:
-        from app.config import settings as _s
-        record_tokens(int(state["project_id"]), "phase_4", _s.main_llm_model, _p4_inp, _p4_out, calc_cost(_p4_inp, _p4_out))
     ps = dict(state.get("phase_status") or {})
     ps["phase_4"] = "complete"
     return {
         "phase_status": ps,
         "team_suggestion": {"members": members, "technologies": all_technologies},
     }
+
+
+def suggest_team_direct(tech_stack: dict) -> dict:
+    """Query employees matching tech_stack skills without going through LangGraph.
+
+    Used by the suggest_team router when phase 3 was run via the streaming
+    endpoint (which saves to project.tech_stack but not the LangGraph checkpoint).
+    """
+    from sqlalchemy.orm import joinedload as _jl
+    from app.models.project import Project as _Project
+
+    all_technologies = (
+        tech_stack.get("frontend", []) + tech_stack.get("backend", []) +
+        tech_stack.get("database", []) + tech_stack.get("infra", [])
+    )
+
+    if all_technologies:
+        members: list[dict] = get_employees.func(all_technologies)
+    else:
+        _db2 = SessionLocal()
+        try:
+            _all_emps = (
+                _db2.query(Employee)
+                .options(_jl(Employee.employee_skills).joinedload(EmployeeSkill.skill))
+                .order_by(Employee.name)
+                .all()
+            )
+            members = [
+                {
+                    "id": e.id,
+                    "name": e.name,
+                    "seniority": e.seniority,
+                    "availability_pct": e.availability_pct,
+                    "skills": [es.skill.name for es in e.employee_skills],
+                }
+                for e in _all_emps
+            ]
+        finally:
+            _db2.close()
+
+    required = {t.lower() for t in all_technologies}
+
+    def _match_score(m: dict) -> float:
+        if not required:
+            return 0.0
+        skills = {s.lower() for s in m.get("skills", [])}
+        return round(len(skills & required) / len(required), 2)
+
+    members = [{**m, "match_score": _match_score(m)} for m in members]
+    members.sort(key=lambda m: m["match_score"], reverse=True)
+
+    _db = SessionLocal()
+    try:
+        _active_projs = (
+            _db.query(_Project)
+            .filter(_Project.status != "complete", _Project.team_suggestion.isnot(None))
+            .all()
+        )
+        _active_map: dict[int, int] = {}
+        for _p in _active_projs:
+            for _m in (_p.team_suggestion or {}).get("members", []):
+                _eid = _m.get("id")
+                if _eid:
+                    _active_map[_eid] = _active_map.get(_eid, 0) + 1
+    finally:
+        _db.close()
+
+    members = [{**m, "active_projects_count": _active_map.get(m["id"], 0)} for m in members]
+    return {"members": members, "technologies": all_technologies}
 
 
 async def _phase_5_estimate_node(state: ProjectState) -> dict[str, Any]:
