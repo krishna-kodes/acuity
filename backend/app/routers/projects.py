@@ -1399,7 +1399,7 @@ async def suggest_stack(
 def get_stack(
     project_id: str,
     db: Session = Depends(get_db),
-):
+) -> Response | TechStackResponse:
     """Return cached tech stack or 204 if not yet generated."""
     project = _get_project_or_404(project_id, db)
     cached = project.tech_stack or {}
