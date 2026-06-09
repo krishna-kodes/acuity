@@ -429,3 +429,34 @@ export async function approveModules(projectId: string): Promise<ModulesData> {
   if (!res.ok) throw new Error(`Approve modules failed: ${res.status}`)
   return res.json()
 }
+
+// ── Branding ─────────────────────────────────────────────────────────────────
+
+export interface BrandingSettings {
+  company_name: string;
+  primary_color: string;
+  secondary_color: string;
+  prepared_by: string;
+  updated_at: string | null;
+}
+
+export async function getBranding(): Promise<BrandingSettings> {
+  const res = await fetch(`${_apiBase()}/api/v1/admin/branding`);
+  if (!res.ok) throw new Error(`Failed to fetch branding: ${res.status}`);
+  return res.json();
+}
+
+export async function updateBranding(
+  data: Partial<Omit<BrandingSettings, "updated_at">>
+): Promise<BrandingSettings> {
+  const res = await fetch(`${_apiBase()}/api/v1/admin/branding`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const detail = await res.json().catch(() => ({}));
+    throw new Error(detail?.detail ?? `Failed to update branding: ${res.status}`);
+  }
+  return res.json();
+}
