@@ -234,7 +234,7 @@ export default function TechStackPage({ params }: { params: Promise<{ id: string
               <span className="text-xs font-semibold text-text-muted uppercase tracking-wide">
                 {items.length} technolog{items.length !== 1 ? "ies" : "y"} recommended
               </span>
-              <span className="text-xs text-success font-medium">All approved ✓</span>
+              <span className="text-xs text-text-muted font-medium">From approved list</span>
             </div>
 
             <div className="divide-y divide-border">
