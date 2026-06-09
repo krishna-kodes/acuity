@@ -2,10 +2,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    main_llm_provider: str = "google"
-    main_llm_model: str = "gemini-1.5-pro"
-    fast_llm_provider: str = "google"
-    fast_llm_model: str = "gemini-1.5-flash"
+    main_llm_provider: str = "openai"
+    main_llm_model: str = "gpt-5.4-mini"
+    fast_llm_provider: str = "openai"
+    fast_llm_model: str = "gpt-5.4-nano"
     temperature: float = 0.2
     openai_api_key: str = ""
     google_api_key: str = ""

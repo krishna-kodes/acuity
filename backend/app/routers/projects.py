@@ -166,38 +166,23 @@ def _proposal_to_response(proposal: "Proposal", project_id: str) -> ProposalResp
     )
 
 
-async def _run_proposal_generation(
+def _save_proposal_from_sections(
     project: "Project",
     db: Session,
-    extra_feedback: str = "",
+    structured_sections: list,
 ) -> "Proposal":
-    """Generate structured proposal, persist DOCX + Proposal row. Does NOT advance phase."""
+    """Persist DOCX + Proposal row from pre-generated sections. Sync — no LLM calls."""
     from app.services.exporter import generate_proposal_docx
-    from app.services.proposal_generator import generate_structured_proposal
-
-    # Generate all 10 structured sections via fan-out
-    structured_sections = await generate_structured_proposal(
-        project, db, additional_context=extra_feedback
-    )
-    sections_json_str = json.dumps(
-        [s.model_dump(mode="json") for s in structured_sections]
-    )
-
-    # Build legacy flat content for backward compat (DOCX + content_json)
-    generated_text = "\n\n".join(
-        f"## {s.title}\n{s.content}" for s in structured_sections
-    )
-    content = _parse_proposal_sections(project.name, generated_text)
-
-    # DOCX with structured sections
-    sections_dicts = [s.model_dump(mode="json") for s in structured_sections]
     from app.services.branding import get_branding
+
+    sections_json_str = json.dumps([s.model_dump(mode="json") for s in structured_sections])
+    generated_text = "\n\n".join(f"## {s.title}\n{s.content}" for s in structured_sections)
+    content = _parse_proposal_sections(project.name, generated_text)
+    sections_dicts = [s.model_dump(mode="json") for s in structured_sections]
     branding = get_branding(db)
     content_path = generate_proposal_docx(
         project.id, content, structured_sections=sections_dicts, branding=branding
     )
-
-    # Persist proposal row
     doc = db.query(Document).filter(Document.project_id == project.id).first()
     content_dict = dataclasses.asdict(content)
     proposal = Proposal(
@@ -212,6 +197,20 @@ async def _run_proposal_generation(
     db.commit()
     db.refresh(proposal)
     return proposal
+
+
+async def _run_proposal_generation(
+    project: "Project",
+    db: Session,
+    extra_feedback: str = "",
+) -> "Proposal":
+    """Generate structured proposal, persist DOCX + Proposal row. Does NOT advance phase."""
+    from app.services.proposal_generator import generate_structured_proposal
+
+    structured_sections = await generate_structured_proposal(
+        project, db, additional_context=extra_feedback
+    )
+    return _save_proposal_from_sections(project, db, structured_sections)
 
 
 def _tech_preview(ts: dict | None) -> list[str]:
@@ -757,6 +756,38 @@ async def generate_proposal(
     return _proposal_to_response(proposal, project_id)
 
 
+@router.post("/projects/{project_id}/proposal/stream")
+async def generate_proposal_stream(
+    project_id: str,
+    db: Session = Depends(get_db),
+):
+    """SSE stream for initial proposal generation. Same events as retry/stream."""
+    from app.services.proposal_generator import generate_structured_proposal_stream
+    from fastapi.responses import StreamingResponse
+
+    project = _get_project_or_404(project_id, db)
+
+    async def _generate():
+        sections = []
+        async for section in generate_structured_proposal_stream(project, db):
+            sections.append(section)
+            payload = json.dumps({"type": "section", "section": section.model_dump(mode="json")})
+            yield f"data: {payload}\n\n"
+
+        proposal = _save_proposal_from_sections(project, db, sections)
+        done_payload = json.dumps({
+            "type": "done",
+            "proposal": _proposal_to_response(proposal, project_id).model_dump(mode="json"),
+        })
+        yield f"data: {done_payload}\n\n"
+
+    return StreamingResponse(
+        _generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 @router.get("/projects/{project_id}/proposal", response_model=ProposalResponse)
 def get_proposal(
     project_id: str,
@@ -785,6 +816,39 @@ async def retry_proposal(
     project = _get_project_or_404(project_id, db)
     proposal = await _run_proposal_generation(project, db, extra_feedback=body.comment)
     return _proposal_to_response(proposal, project_id)
+
+
+@router.post("/projects/{project_id}/proposal/retry/stream")
+async def retry_proposal_stream(
+    project_id: str,
+    body: ProposalRetryRequest,
+    db: Session = Depends(get_db),
+):
+    """SSE stream: emits each section as generated, then a done event with the full proposal."""
+    from app.services.proposal_generator import generate_structured_proposal_stream
+    from fastapi.responses import StreamingResponse
+
+    project = _get_project_or_404(project_id, db)
+
+    async def _generate():
+        sections = []
+        async for section in generate_structured_proposal_stream(project, db, body.comment):
+            sections.append(section)
+            payload = json.dumps({"type": "section", "section": section.model_dump(mode="json")})
+            yield f"data: {payload}\n\n"
+
+        proposal = _save_proposal_from_sections(project, db, sections)
+        done_payload = json.dumps({
+            "type": "done",
+            "proposal": _proposal_to_response(proposal, project_id).model_dump(mode="json"),
+        })
+        yield f"data: {done_payload}\n\n"
+
+    return StreamingResponse(
+        _generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.post("/projects/{project_id}/proposal/approve", response_model=ProposalResponse)
@@ -863,7 +927,7 @@ async def regenerate_section(
         record_tokens(
             project_id=int(project_id),
             phase="proposal_section_regen",
-            model="claude-sonnet-4-6",
+            model="gpt-5.4-nano",
             input_tokens=0,
             output_tokens=0,
             cost_usd=0.0,
