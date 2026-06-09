@@ -453,7 +453,37 @@ async def _phase_3_stack_node(state: ProjectState) -> dict[str, Any]:
         infra: list[str]
         rationale: str
 
-    proposal_summary = state.get("proposal_state", {}).get("summary", "No proposal summary available.")
+    _SECTION_KEYS = ("overview", "technical_requirements", "key_features", "problem_statement")
+    _sections = state.get("proposal_sections") or {}
+
+    # Fallback: load from DB if LangGraph state has no sections
+    if not _sections:
+        try:
+            from app.models.project import Proposal as _Proposal
+            _pdb = SessionLocal()
+            try:
+                _prop = _pdb.query(_Proposal).filter(
+                    _Proposal.project_id == int(state["project_id"])
+                ).order_by(_Proposal.id.desc()).first()
+                if _prop and _prop.sections_json:
+                    for _s in _json.loads(_prop.sections_json):
+                        _sections[_s["section_id"]] = _s
+            finally:
+                _pdb.close()
+        except Exception:
+            pass
+
+    _section_parts = []
+    for _k in _SECTION_KEYS:
+        _sec = _sections.get(_k) or {}
+        _title = _sec.get("title") or _k.replace("_", " ").title()
+        _content = _sec.get("content", "").strip()
+        if _content:
+            _section_parts.append(f"### {_title}\n{_content}")
+    proposal_summary = "\n\n".join(_section_parts) if _section_parts else (
+        state.get("raw_doc_text", "")[:3000] or "No proposal context available."
+    )
+
     tech_descriptions = "\n".join(
         f"- {t['name']} ({t['category']}): {t['tags']}" for t in tech_list
     ) or "No approved technologies in database."
@@ -791,7 +821,7 @@ async def run_phase(project_id: str, state_update: dict | None = None) -> dict:
         # No state or graph ended (error / complete) — fresh run carrying useful context
         initial: ProjectState = {**_EMPTY_STATE, "project_id": project_id}
         # Preserve any data already computed in previous phases
-        for key in ("raw_doc_text", "proposal_state", "tbd_items", "tech_stack",
+        for key in ("raw_doc_text", "proposal_state", "proposal_sections", "tbd_items", "tech_stack",
                     "team_suggestion", "effort_estimates", "epics", "metrics"):
             if existing_vals.get(key):
                 initial[key] = existing_vals[key]  # type: ignore[literal-required]

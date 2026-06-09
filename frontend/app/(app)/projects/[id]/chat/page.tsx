@@ -11,12 +11,13 @@ import { getPhasesForRoute, getNextPhaseRoute } from "@/lib/project-phases";
 import {
   getTBDs,
   submitClarification,
-  generateProposalRaw,
-  retryProposal,
+  generateProposalStream,
+  retryProposalStream,
   approveProposal,
   regenerateSection,
   getProposalExportUrl,
   getProject,
+  getChatHistory,
 } from "@/lib/api";
 import type { ProposalData, StructuredSection, SectionStatus, RiskItem, PersonaItem, FeatureItem } from "@/lib/api";
 import type { ChatMessage } from "@/components/chat-thread";
@@ -31,10 +32,12 @@ function StatusBadge({ status }: { status: SectionStatus }) {
       ? "bg-success-subtle text-success"
       : status === "draft"
         ? "bg-warning-subtle text-warning"
-        : "bg-destructive-subtle text-destructive"
+        : status === "generating"
+          ? "bg-primary/10 text-primary"
+          : "bg-destructive-subtle text-destructive"
   return (
     <span className={cn("text-[10px] font-medium px-2 py-0.5 rounded-full", cls)}>
-      {status}
+      {status === "generating" ? "generating…" : status}
     </span>
   )
 }
@@ -175,7 +178,7 @@ function ProposalAccordion({
 
 function makeWelcomeMessage(tbdCount: number): ChatMessage {
   const now = new Date();
-  const timestamp = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const timestamp = now.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
   const tbdLine =
     tbdCount === 0
       ? "No open items need clarification — feel free to ask questions or generate the proposal directly."
@@ -227,10 +230,10 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
         title: t.question,
         desc: t.question,
         level: TBD_LEVEL_LABELS[t.level] ?? "Explicit TBD",
-        status: "open" as TBDAction,
+        status: ((t as { status?: string }).status ?? "open") as TBDAction | "open",
       }));
     },
-    staleTime: Infinity,
+    staleTime: 0,
     refetchOnWindowFocus: false,
   });
 
@@ -272,6 +275,30 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
+  // Hydrate persisted chat history from backend
+  const { data: chatHistory } = useQuery({
+    queryKey: ["chat-history", projectId],
+    queryFn: () => getChatHistory(projectId),
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+  });
+
+  useEffect(() => {
+    if (!chatHistory || chatHistory.length === 0) return;
+    const ts = new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
+    const hydrated: ChatMessage[] = chatHistory.map((m, i) => ({
+      id: `history-${i}`,
+      role: m.role === "user" ? ("pm" as const) : ("ai" as const),
+      text: m.content,
+      timestamp: ts,
+    }));
+    setMessages((prev) => {
+      const synthetic = prev.filter((m) => m.id === "welcome" || m.id === "summary");
+      return [...synthetic, ...hydrated];
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chatHistory]);
+
   // Auto-scroll on new messages
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -295,14 +322,14 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
       id: String(Date.now()),
       role: "pm",
       text,
-      timestamp: new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }),
+      timestamp: new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false }),
     };
     setMessages((prev) => [...prev, userMsg]);
     setIsLoading(true);
 
   // Add empty AI message placeholder
   const aiId = String(Date.now() + 1);
-  const ts = new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
+  const ts = new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
   setMessages((prev) => [...prev, { id: aiId, role: "ai" as const, text: "", timestamp: ts }]);
 
   try {
@@ -372,6 +399,7 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
           } else if (event.type === "tbds") {
             queryClient.invalidateQueries({ queryKey: ["tbds", projectId] });
           } else if (event.type === "done") {
+            queryClient.invalidateQueries({ queryKey: ["chat-history", projectId] });
             break;
           } else if (event.type === "error") {
             throw new Error(event.content ?? event.message ?? "Stream error");
@@ -419,11 +447,29 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
   async function handleGenerateProposal() {
     setGenerating(true);
     setProposalError(null);
+    // Show proposal panel immediately with empty sections so sections stream in
+    setProposalData({ id: "", project_id: projectId, content_path: "", created_at: "", sections: [], structured_sections: [] });
     try {
-      const data = await generateProposalRaw(projectId);
-      setProposalData(data);
+      await generateProposalStream(
+        projectId,
+        (section) => {
+          setProposalData((prev) => {
+            if (!prev) return prev;
+            const existing = prev.structured_sections ?? [];
+            const idx = existing.findIndex((s) => s.section_id === section.section_id);
+            const updated = idx >= 0
+              ? existing.map((s, i) => (i === idx ? section : s))
+              : [...existing, section];
+            return { ...prev, structured_sections: updated };
+          });
+        },
+        (proposal) => {
+          setProposalData(proposal);
+        },
+      );
     } catch (err) {
       setProposalError(err instanceof Error ? err.message : "Generation failed");
+      setProposalData(null);
     } finally {
       setGenerating(false);
     }
@@ -433,11 +479,29 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
     if (!retryComment.trim()) return;
     setRetrying(true);
     setProposalError(null);
+    // Clear sections so they stream in progressively
+    setProposalData((prev) => prev ? { ...prev, structured_sections: [] } : prev);
     try {
-      const data = await retryProposal(projectId, retryComment);
-      setProposalData(data);
-      setRetryComment("");
-      setShowRetryInput(false);
+      await retryProposalStream(
+        projectId,
+        retryComment,
+        (section) => {
+          setProposalData((prev) => {
+            if (!prev) return prev;
+            const existing = prev.structured_sections ?? [];
+            const idx = existing.findIndex((s) => s.section_id === section.section_id);
+            const updated = idx >= 0
+              ? existing.map((s, i) => (i === idx ? section : s))
+              : [...existing, section];
+            return { ...prev, structured_sections: updated };
+          });
+        },
+        (proposal) => {
+          setProposalData(proposal);
+          setRetryComment("");
+          setShowRetryInput(false);
+        },
+      );
     } catch (err) {
       setProposalError(err instanceof Error ? err.message : "Retry failed");
     } finally {
@@ -543,10 +607,32 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
                 </a>
               </div>
 
+              {/* Generation progress bar */}
+              {(generating || retrying) && (() => {
+                const done = proposalData.structured_sections?.length ?? 0;
+                const total = 10;
+                const pct = Math.round((done / total) * 100);
+                const label = done === 0 ? "Starting…" : done === total ? "Finalizing…" : `${done} of ${total} sections`;
+                return (
+                  <div className="px-4 py-3 border-b border-border bg-surface-subtle/40 shrink-0">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="text-[11px] text-text-muted">{label}</span>
+                      <span className="text-[11px] font-semibold text-primary">{pct}%</span>
+                    </div>
+                    <div className="h-1 bg-muted rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-primary rounded-full transition-all duration-500 ease-out"
+                        style={{ width: `${Math.max(4, pct)}%` }}
+                      />
+                    </div>
+                  </div>
+                );
+              })()}
+
               {/* Sections */}
               <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
                 <p className="text-[11px] font-semibold text-foreground uppercase tracking-wide">
-                  Generated Proposal
+                  {generating || retrying ? "Generating Proposal…" : "Generated Proposal"}
                 </p>
                 {proposalData.structured_sections?.length ? (
                   <ProposalAccordion
@@ -667,11 +753,27 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
             <>
               <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
                 <span className="text-xs font-semibold text-foreground">TBD Items</span>
-                {outstandingTbds > 0 && (
-                  <span className="text-[11px] font-medium text-warning bg-warning-subtle px-2 py-0.5 rounded-full">
-                    {outstandingTbds} open
-                  </span>
-                )}
+                <div className="flex items-center gap-2">
+                  {outstandingTbds > 0 && (
+                    <span className="text-[11px] font-medium text-warning bg-warning-subtle px-2 py-0.5 rounded-full">
+                      {outstandingTbds} open
+                    </span>
+                  )}
+                  <button
+                    onClick={() => refetchTbds()}
+                    disabled={tbdsPending}
+                    title="Refresh TBD items"
+                    className="text-text-muted hover:text-foreground transition-colors disabled:opacity-40"
+                  >
+                    <svg
+                      className={cn("w-3.5 h-3.5", tbdsPending && "animate-spin")}
+                      fill="none" viewBox="0 0 14 14" stroke="currentColor" strokeWidth={2}
+                    >
+                      <path d="M12 7A5 5 0 1 1 7 2" strokeLinecap="round" />
+                      <path d="M7 2l2 2-2 2" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  </button>
+                </div>
               </div>
 
               <div className="flex-1 overflow-y-auto px-4 py-4">

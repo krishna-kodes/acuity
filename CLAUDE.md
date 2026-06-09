@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-> **Implementation status (June 2026):** Frontend (Next.js 16.2, Tailwind v4) through Epics 0–3 complete. Backend: FastAPI scaffold, SQLite schema (17 tables + Alembic), ChromaDB ingestion pipeline, GitHub MCP sync, eval harness all done. Epic 5 in progress (LangGraph, PII).
+> **Implementation status (June 2026):** Frontend (Next.js 16.2, Tailwind v4) through Epics 0–3 complete. Backend: FastAPI scaffold, SQLite schema (17+ tables + Alembic), ChromaDB ingestion pipeline, GitHub MCP sync, eval harness (33 test cases), structured proposal generator all done. LLM stack: OpenAI `gpt-5.4-nano` (main + fast + structured), `text-embedding-3-small` (embeddings).
 
 > **Design document overrides:** `capstone_project_design_document.md` is the original submission artifact and has not been updated. Where it conflicts with this file, **this file wins**:
 > - **Embedding model:** Design doc says `Gemini text-embedding-004` — overridden by ADR-004. Use `text-embedding-3-small` (OpenAI, 1536 dims).
@@ -20,10 +20,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 6. **`phase_status` dict must be updated in `ProjectState` at every phase transition**
 7. **Fernet for PII encryption** — key from `PII_ENCRYPTION_KEY` env var
 8. **SQLite WAL mode** — `PRAGMA journal_mode=WAL` on engine init; `check_same_thread=False`
-9. **LLM provider switchable via env var** — never hardcode `google` or `anthropic`
-10. **GitHub MCP only** — no Jira references anywhere in codebase
+9. **LLM provider switchable via env var** — never hardcode provider names; read from `MAIN_LLM_PROVIDER` / `FAST_LLM_PROVIDER`
+10. **Sync provider switchable via `SYNC_PROVIDER` env var** — `github` (default) or `jira`; resolved at runtime via `sync_factory.py`
 11. **Two separate SQLite databases** — `app.db` for application data, `project_state.db` for LangGraph checkpoints
-12. **Use `google-genai` SDK, not `google-generativeai`** — `google-generativeai` is deprecated/EOL. Use `langchain-google-genai` for LangChain integration. Models: `gemini-2.5-pro` (main), `gemini-2.5-flash` (fast).
+12. **Use `langchain-openai` for LLM calls** — main and fast LLM both use `MAIN_LLM_PROVIDER=openai` / `FAST_LLM_PROVIDER=openai`. Models: `gpt-5.4-nano` (main and fast).
 
 ---
 
@@ -115,7 +115,7 @@ A PM uploads a requirements document (PDF/DOCX), refines it through an AI-assist
 **Phase 2 sub-steps:**
 1. RAG chat loop — PM asks questions; TBDs surfaced via LLM
 2. Clarification widget — PM responds per TBD item with one of: **Answer / TBD / Out-of-Scope**; each response saved to `clarifications` table
-3. Proposal generation — PM clicks "Generate Proposal"; a fresh structured proposal document is created from the refined requirements (not in-place editing of the upload). Stored in `proposals` table; DOCX written to `/documents/`
+3. Proposal generation — PM clicks "Generate Proposal"; 10-section structured proposal generated via fan-out (`asyncio.gather`). Sections: overview, problem_statement, goals_and_non_goals, target_audience, key_features, technical_requirements, risks_and_mitigations, success_metrics, timeline_and_milestones, open_questions. Stored as `sections_json` in `proposals` table (`template_version="1.0"`); DOCX written to `/documents/`. Per-section regeneration via `POST /proposal/sections/{section_id}/regenerate`. `open_questions` is zero-LLM (direct DB read of TBD clarifications).
 
 **API endpoints for Phase 2:**
 ```
@@ -131,6 +131,7 @@ class ProjectState(TypedDict):
     project_id: str
     raw_doc_text: str          # Phase 1
     proposal_state: dict       # Phase 2
+    proposal_sections: dict    # Phase 2 — keyed by ProposalSectionId str value
     tbd_items: list            # Phase 2
     tech_stack: dict           # Phase 3
     team_suggestion: dict      # Phase 4
@@ -150,9 +151,9 @@ Phase transitions are PM-initiated ("Proceed" button). Phase N cannot start unti
 | Backend | FastAPI + Uvicorn |
 | ORM / DB | SQLAlchemy + SQLite + Alembic |
 | Vector DB | ChromaDB `PersistentClient` |
-| LLM (main) | Gemini 2.5 Pro via `google-genai` SDK (`langchain-google-genai`) — switchable via `MAIN_LLM_PROVIDER` |
-| LLM (fast) | Gemini 2.5 Flash — query rewriting, LLM-as-judge |
-| LLM (structured) | Claude Sonnet — estimation + epic generation (Phase 5–6) |
+| LLM (main) | `gpt-5.4-nano` via `langchain-openai` — switchable via `MAIN_LLM_PROVIDER` |
+| LLM (fast) | `gpt-5.4-nano` — query rewriting, LLM-as-judge |
+| LLM (structured) | `gpt-5.4-nano` — estimation + epic generation (Phase 5–6) |
 | Embeddings | `text-embedding-3-small`, 1536 dims, cosine distance |
 | Sparse retrieval | BM25 (rank-bm25) — merged with dense results before reranker |
 | Reranker | `cross-encoder/ms-marco-MiniLM-L-6-v2` (local, ~500MB) |
@@ -201,6 +202,7 @@ All routes prefixed `/api/v1/`. OpenAPI spec auto-generated at `/docs`.
 | POST | `/projects/{id}/clarifications` | Submit TBD clarification answers |
 | POST | `/projects/{id}/proposal` | Trigger proposal generation |
 | GET | `/projects/{id}/proposal` | Retrieve generated proposal |
+| POST | `/projects/{id}/proposal/sections/{section_id}/regenerate` | Regenerate single proposal section |
 | POST | `/projects/{id}/stack` | Run tech stack suggestion |
 | POST | `/projects/{id}/estimate` | Run effort estimation |
 | POST | `/projects/{id}/sync` | Sync epics/tasks to GitHub |
@@ -297,7 +299,9 @@ clarifications (
 
 proposals (
   id, project_id, document_id,
-  content_path, created_at
+  content_path, content_json, created_at,
+  sections_json,       -- JSON array of 10 structured SectionResponse objects (template_version 1.0+)
+  template_version     -- "1.0" for structured proposals; NULL for legacy
 )
 ```
 
@@ -415,25 +419,33 @@ GitHub Sync stats (tickets created, sync success/failure rate) surface in the Er
 Copy this to `.env` and fill in values:
 
 ```bash
-# LLM
-MAIN_LLM_PROVIDER=google
-MAIN_LLM_MODEL=gemini-1.5-pro
-FAST_LLM_PROVIDER=google
-FAST_LLM_MODEL=gemini-1.5-flash
+# LLM — available models on this OpenAI key: gpt-5.4-mini, gpt-5.4-nano, text-embedding-3-small
+MAIN_LLM_PROVIDER=openai
+MAIN_LLM_MODEL=gpt-5.4-nano
+FAST_LLM_PROVIDER=openai
+FAST_LLM_MODEL=gpt-5.4-nano
 TEMPERATURE=0.2
 
 # APIs
 OPENAI_API_KEY=
-GOOGLE_API_KEY=
-ANTHROPIC_API_KEY=
+# GOOGLE_API_KEY and ANTHROPIC_API_KEY not used — leave blank or omit
 
-# GitHub
+# Sync provider (global default — overridable per-project)
+SYNC_PROVIDER=github              # "github" | "jira"
+
+# GitHub MCP
 GITHUB_TOKEN=
 GITHUB_OWNER=
 GITHUB_REPO=
 GITHUB_USE_PROJECTS_V2=false
 
-# Embeddings + ChromaDB
+# Jira MCP (required when SYNC_PROVIDER=jira)
+JIRA_URL=
+JIRA_USERNAME=
+JIRA_API_TOKEN=
+JIRA_PROJECT_KEY=
+
+# Embeddings (never change EMBEDDING_DIMENSIONS after first ingestion)
 EMBEDDING_DIMENSIONS=1536
 CHROMA_PERSIST_PATH=./chroma_db
 
@@ -461,9 +473,11 @@ ALLOWED_FILE_TYPES=pdf,docx
 PROMPT_INJECTION_DETECTION=true
 MAX_COST_PER_WORKFLOW_USD=0.50
 
-# Observability
+# Observability (LangSmith)
 OBSERVABILITY_PROVIDER=langsmith
 LANGSMITH_API_KEY=
+LANGCHAIN_TRACING_V2=true
+LANGCHAIN_PROJECT=acuity
 
 # Seed data
 FAKER_SEED=42
@@ -476,6 +490,9 @@ METRICS_ENABLED=true
 TOKEN_TRACKING_ENABLED=true
 COST_PER_1K_INPUT_TOKENS=0.0015
 COST_PER_1K_OUTPUT_TOKENS=0.002
+
+# Frontend
+NEXT_PUBLIC_API_URL=http://localhost:8000
 ```
 
 Add to `.gitignore`: `.env`, `chroma_db/`, `project_state.db`, `app.db`, `documents/`

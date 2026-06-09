@@ -54,10 +54,7 @@ function TBDItemRow({
 
   return (
     <div
-      className={cn(
-        "border border-border rounded-md overflow-hidden transition-colors",
-        isResolved && "opacity-70"
-      )}
+      className="border border-border rounded-md overflow-hidden transition-colors"
     >
       {/* Header row */}
       <button
@@ -89,7 +86,7 @@ function TBDItemRow({
       {expanded && (
         <div className="px-3.5 pb-3.5 border-t border-border bg-surface-subtle/50">
           <p className="text-xs text-text-secondary mt-2.5 mb-3 leading-relaxed">{item.desc}</p>
-          {!isResolved && onAction && (
+          {onAction && (
             <div className="flex items-center gap-2">
               {ACTION_BUTTONS.map(({ action, label }) => (
                 <button
@@ -97,7 +94,13 @@ function TBDItemRow({
                   onClick={() => onAction(item.id, action)}
                   className={cn(
                     "px-3 py-1.5 rounded-md text-xs font-medium border transition-colors",
-                    action === "answered"
+                    item.status === action
+                      ? action === "answered"
+                        ? "bg-success border-success text-white"
+                        : action === "oos"
+                        ? "bg-destructive border-destructive text-white"
+                        : "bg-secondary border-border text-foreground"
+                      : action === "answered"
                       ? "bg-success-subtle border-success/30 text-success hover:bg-success hover:text-white"
                       : action === "oos"
                       ? "bg-destructive-subtle border-destructive/30 text-destructive hover:bg-destructive hover:text-white"

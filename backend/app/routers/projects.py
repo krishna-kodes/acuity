@@ -668,7 +668,8 @@ def get_tbds(
 
     tbds = (
         db.query(Clarification)
-        .filter(Clarification.project_id == pid, Clarification.status == TBDStatus.open)
+        .filter(Clarification.project_id == pid)
+        .order_by(Clarification.status)
         .all()
     )
     return [
@@ -676,7 +677,8 @@ def get_tbds(
             id=str(t.id),
             question=t.title,
             level=_tbd_level_int.get(t.level, 1),
-            resolved=False,
+            resolved=t.status != TBDStatus.open,
+            status=t.status.value if hasattr(t.status, "value") else str(t.status),
         )
         for t in tbds
     ]
