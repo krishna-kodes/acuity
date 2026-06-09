@@ -34,19 +34,15 @@ export default function EstimationPage({ params }: { params: Promise<{ id: strin
   useEffect(() => {
     if (estimationFiredRef.current) return;
     estimationFiredRef.current = true;
-    let cancelled = false;
+
     estimateEffort(id)
-      .then(({ data }) => {
-        if (!cancelled && data) setEffort(data as unknown as EffortData);
-      })
+      .then(({ data }) => { if (data) setEffort(data as unknown as EffortData); })
       .catch(() => {})
-      .finally(() => { if (!cancelled) setLoading(false); });
+      .finally(() => { setLoading(false); });
 
     getModules(id)
-      .then((data) => { if (!cancelled) setModules(data.modules); })
+      .then((data) => { setModules(data.modules); })
       .catch(() => {});
-
-    return () => { cancelled = true; };
   }, [id]);
 
   async function handleProceed() {
