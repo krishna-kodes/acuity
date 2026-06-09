@@ -223,6 +223,33 @@ def test_seed_all_total(client, db_session):
     assert db_session.query(ApprovedTechnology).count() == 22
 
 
+def test_seed_technologies_backfills_tags_on_second_run(client, db_session):
+    from app.models.reference import ApprovedTechnology
+
+    # First run: inserts records (tags may be empty for legacy data — simulate by clearing)
+    client.post("/api/v1/factory/seed-technologies")
+    # Wipe tags to simulate pre-existing tag-less records
+    db_session.query(ApprovedTechnology).update({"tags": None})
+    db_session.commit()
+
+    # Second run: should upsert and restore tags
+    resp = client.post("/api/v1/factory/seed-technologies")
+    assert resp.status_code == 200
+
+    next_js = db_session.query(ApprovedTechnology).filter_by(name="Next.js").first()
+    assert next_js is not None
+    assert next_js.tags is not None
+    assert "SPA" in next_js.tags
+
+    sqlite = db_session.query(ApprovedTechnology).filter_by(name="SQLite").first()
+    assert sqlite is not None
+    assert "prototyping" in sqlite.tags
+
+    postgres = db_session.query(ApprovedTechnology).filter_by(name="PostgreSQL").first()
+    assert postgres is not None
+    assert "high-scale" in postgres.tags
+
+
 def test_reset_db_clears_data(client, db_session):
     from app.models.employee import Employee
     from app.services.seeder import seed_employees

@@ -21,15 +21,29 @@ _SEED_SKILLS = [
 ]
 
 _APPROVED_TECHS = [
-    ("Next.js", "frontend"), ("React", "frontend"), ("Vue.js", "frontend"),
-    ("TypeScript", "frontend"), ("Tailwind CSS", "frontend"),
-    ("FastAPI", "backend"), ("Django", "backend"), ("Node.js", "backend"),
-    ("Go", "backend"), ("Rust", "backend"),
-    ("PostgreSQL", "database"), ("SQLite", "database"), ("MongoDB", "database"),
-    ("Redis", "database"), ("Elasticsearch", "database"),
-    ("Docker", "infra"), ("Kubernetes", "infra"), ("Railway", "infra"),
-    ("AWS Lambda", "infra"), ("Terraform", "infra"),
-    ("LangChain", "ai"), ("ChromaDB", "ai"),
+    # (name, category, tags)
+    ("Next.js",       "frontend", "SPA,SSR,TypeScript-first,prototyping,production"),
+    ("React",         "frontend", "SPA,component-library,flexible,prototyping,production"),
+    ("Vue.js",        "frontend", "SPA,lightweight,progressive,prototyping"),
+    ("TypeScript",    "frontend", "typed,compile-time-safety,large-team"),
+    ("Tailwind CSS",  "frontend", "utility-CSS,rapid-prototyping,design-system"),
+    ("FastAPI",       "backend",  "REST,async,Python,ML-friendly,prototyping,production"),
+    ("Django",        "backend",  "REST,batteries-included,ORM,Python,high-scale"),
+    ("Node.js",       "backend",  "REST,event-driven,JavaScript,high-scale"),
+    ("Go",            "backend",  "REST,high-performance,compiled,high-scale"),
+    ("Rust",          "backend",  "systems,high-performance,compiled,high-scale"),
+    ("PostgreSQL",    "database", "relational,ACID,production,high-scale"),
+    ("SQLite",        "database", "relational,embedded,prototyping,low-scale"),
+    ("MongoDB",       "database", "NoSQL,flexible-schema,document-store,high-scale"),
+    ("Redis",         "database", "cache,pub-sub,session-store,high-scale"),
+    ("Elasticsearch", "database", "search,full-text,analytics,high-scale"),
+    ("Docker",        "infra",    "containerization,local-dev,portable"),
+    ("Kubernetes",    "infra",    "orchestration,high-scale,complex-ops,production"),
+    ("Railway",       "infra",    "PaaS,simple-deploy,low-ops,prototyping"),
+    ("AWS Lambda",    "infra",    "serverless,event-driven,high-scale,pay-per-use"),
+    ("Terraform",     "infra",    "IaC,cloud-provisioning,production"),
+    ("LangChain",     "ai",       "LLM-orchestration,RAG,agents,Python"),
+    ("ChromaDB",      "ai",       "vector-store,embeddings,RAG,local-dev"),
 ]
 
 
@@ -97,10 +111,12 @@ def seed_technologies(db: Session, count: int | None = None) -> int:
     if count is None:
         count = settings.seed_technology_count
     seeded = 0
-    for name, category in _APPROVED_TECHS[:count]:
-        if db.query(ApprovedTechnology).filter(ApprovedTechnology.name == name).first():
-            continue
-        db.add(ApprovedTechnology(name=name, category=category))
+    for name, category, tags in _APPROVED_TECHS[:count]:
+        existing = db.query(ApprovedTechnology).filter(ApprovedTechnology.name == name).first()
+        if existing:
+            existing.tags = tags
+        else:
+            db.add(ApprovedTechnology(name=name, category=category, tags=tags))
         seeded += 1
     db.commit()
     return seeded
