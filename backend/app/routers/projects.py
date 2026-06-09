@@ -1488,6 +1488,7 @@ async def suggest_stack_stream(
         yield f'data: {json.dumps({"type": "status", "message": "Analyzing requirements..."})}\n\n'
 
         buffer = ""
+        full_buffer = ""
         emitted_keys: set[str] = set()
         tech_stack: dict = {}
 
@@ -1495,7 +1496,9 @@ async def suggest_stack_stream(
             async for chunk in llm.astream(prompt):
                 token = chunk.content if hasattr(chunk, "content") else str(chunk)
                 buffer += token
+                full_buffer += token
 
+                last_match_end = 0
                 for key in ("frontend", "backend", "database", "infra"):
                     if key in emitted_keys:
                         continue
@@ -1507,8 +1510,11 @@ async def suggest_stack_stream(
                                 emitted_keys.add(key)
                                 tech_stack[key] = items
                                 yield f'data: {json.dumps({"type": "category", "key": key, "items": items})}\n\n'
+                                last_match_end = max(last_match_end, m.end())
                         except json.JSONDecodeError:
                             pass
+                if last_match_end > 0:
+                    buffer = buffer[last_match_end:]
 
                 if "rationale" not in emitted_keys:
                     m = re.search(r'"rationale":\s*"((?:[^"\\]|\\.)*)"', buffer)
@@ -1524,7 +1530,7 @@ async def suggest_stack_stream(
             # Fallback: parse full buffer for keys the regex missed
             if len(emitted_keys) < 5:
                 try:
-                    cleaned = re.sub(r"```(?:json)?\s*", "", buffer).strip().rstrip("`").strip()
+                    cleaned = re.sub(r"```(?:json)?\s*", "", full_buffer).strip().rstrip("`").strip()
                     parsed = json.loads(cleaned)
                     for key in ("frontend", "backend", "database", "infra"):
                         if key not in emitted_keys and isinstance(parsed.get(key), list):
