@@ -72,3 +72,81 @@ def test_get_branding_falls_back_to_hardcoded_when_env_empty(mem_db, monkeypatch
 
     assert result.primary_color == "#2E5FA3"
     assert result.secondary_color == "#1A3A6B"
+
+
+from fastapi.testclient import TestClient
+from app.database import get_db
+from app.main import app
+
+
+@pytest.fixture
+def api_client(mem_db):
+    def override_db():
+        yield mem_db
+
+    app.dependency_overrides[get_db] = override_db
+    with TestClient(app) as c:
+        yield c
+    app.dependency_overrides.pop(get_db, None)
+
+
+def test_get_branding_endpoint_returns_200_with_defaults(api_client, monkeypatch):
+    monkeypatch.setattr(settings, "branding_primary_color", "#2E5FA3")
+    monkeypatch.setattr(settings, "branding_secondary_color", "#1A3A6B")
+    monkeypatch.setattr(settings, "branding_company_name", "")
+    monkeypatch.setattr(settings, "branding_prepared_by", "")
+
+    resp = api_client.get("/api/v1/admin/branding")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["primary_color"] == "#2E5FA3"
+    assert data["secondary_color"] == "#1A3A6B"
+    assert "updated_at" in data
+
+
+def test_put_branding_endpoint_updates_db(api_client):
+    resp = api_client.put(
+        "/api/v1/admin/branding",
+        json={
+            "company_name": "Acme Inc",
+            "primary_color": "#FF5500",
+            "secondary_color": "#003366",
+            "prepared_by": "Bob Smith",
+        },
+    )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["company_name"] == "Acme Inc"
+    assert data["primary_color"] == "#FF5500"
+    assert data["prepared_by"] == "Bob Smith"
+
+
+def test_put_branding_partial_update_only_changes_provided_fields(api_client, mem_db):
+    row = BrandingSettings(
+        id=1,
+        company_name="Original Corp",
+        primary_color="#111111",
+        secondary_color="#222222",
+        prepared_by="Alice",
+        updated_at=datetime(2026, 6, 9),
+    )
+    mem_db.add(row)
+    mem_db.commit()
+
+    resp = api_client.put("/api/v1/admin/branding", json={"company_name": "New Corp"})
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["company_name"] == "New Corp"
+    assert data["primary_color"] == "#111111"  # unchanged
+    assert data["prepared_by"] == "Alice"  # unchanged
+
+
+def test_put_branding_rejects_invalid_hex(api_client):
+    resp = api_client.put(
+        "/api/v1/admin/branding",
+        json={"primary_color": "not-a-color"},
+    )
+    assert resp.status_code == 422

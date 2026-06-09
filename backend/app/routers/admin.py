@@ -1,9 +1,14 @@
+from datetime import datetime
+
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session, joinedload
 
 from app.database import get_db
+from app.models.branding import BrandingSettings
 from app.models.employee import Employee, EmployeeSkill, Skill
+from app.schemas.branding import BrandingSettingsResponse, BrandingSettingsUpdate
+from app.services.branding import get_branding
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -57,3 +62,44 @@ def list_employees(db: Session = Depends(get_db)) -> list[EmployeeOut]:
 def list_skills(db: Session = Depends(get_db)) -> list[SkillOut]:
     """List all skills ordered by category then name."""
     return db.query(Skill).order_by(Skill.category, Skill.name).all()
+
+
+@router.get("/branding", response_model=BrandingSettingsResponse)
+def get_branding_settings(db: Session = Depends(get_db)) -> BrandingSettingsResponse:
+    """Return current branding settings (DB row merged with env defaults)."""
+    return get_branding(db)
+
+
+@router.put("/branding", response_model=BrandingSettingsResponse)
+def update_branding_settings(
+    body: BrandingSettingsUpdate, db: Session = Depends(get_db)
+) -> BrandingSettingsResponse:
+    """Upsert branding settings (partial update — only provided fields are changed)."""
+    row = db.query(BrandingSettings).filter(BrandingSettings.id == 1).first()
+    if row is None:
+        # Seed new row from current merged values so partial PUT doesn't
+        # stomp env-var defaults with model defaults for un-provided fields.
+        current = get_branding(db)
+        row = BrandingSettings(
+            id=1,
+            company_name=current.company_name,
+            primary_color=current.primary_color,
+            secondary_color=current.secondary_color,
+            prepared_by=current.prepared_by,
+            updated_at=datetime.utcnow(),
+        )
+        db.add(row)
+
+    if body.company_name is not None:
+        row.company_name = body.company_name
+    if body.primary_color is not None:
+        row.primary_color = body.primary_color
+    if body.secondary_color is not None:
+        row.secondary_color = body.secondary_color
+    if body.prepared_by is not None:
+        row.prepared_by = body.prepared_by
+    row.updated_at = datetime.utcnow()
+
+    db.commit()
+    db.refresh(row)
+    return get_branding(db)
