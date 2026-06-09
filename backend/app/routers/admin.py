@@ -103,3 +103,12 @@ def update_branding_settings(
     db.commit()
     db.refresh(row)
     return get_branding(db)
+
+
+@router.delete("/branding", status_code=204)
+def reset_branding_settings(db: Session = Depends(get_db)) -> None:
+    """Delete the DB branding row — GET will fall back to env/hardcoded defaults."""
+    row = db.query(BrandingSettings).filter(BrandingSettings.id == 1).first()
+    if row:
+        db.delete(row)
+        db.commit()

@@ -460,3 +460,8 @@ export async function updateBranding(
   }
   return res.json();
 }
+
+export async function resetBranding(): Promise<void> {
+  const res = await fetch(`${_apiBase()}/api/v1/admin/branding`, { method: "DELETE" });
+  if (!res.ok) throw new Error(`Failed to reset branding: ${res.status}`);
+}

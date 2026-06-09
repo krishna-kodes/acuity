@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { getBranding, updateBranding, type BrandingSettings } from "@/lib/api";
+import { getBranding, updateBranding, resetBranding, type BrandingSettings } from "@/lib/api";
 
 function ColorField({
   label,
@@ -69,20 +69,22 @@ function TextField({
   );
 }
 
+const DEFAULTS: Omit<BrandingSettings, "updated_at"> = {
+  company_name: "",
+  primary_color: "#2E5FA3",
+  secondary_color: "#1A3A6B",
+  prepared_by: "",
+};
+
 export default function BrandingPage() {
   const queryClient = useQueryClient();
-  const { data, isLoading, isError } = useQuery({
+  const { data, isPending: queryPending, isError } = useQuery({
     queryKey: ["branding"],
     queryFn: getBranding,
     refetchOnWindowFocus: false,
   });
 
-  const [form, setForm] = useState<Omit<BrandingSettings, "updated_at">>({
-    company_name: "",
-    primary_color: "#2E5FA3",
-    secondary_color: "#1A3A6B",
-    prepared_by: "",
-  });
+  const [form, setForm] = useState<Omit<BrandingSettings, "updated_at">>(DEFAULTS);
   const [toast, setToast] = useState<{ ok: boolean; msg: string } | null>(null);
 
   useEffect(() => {
@@ -96,18 +98,30 @@ export default function BrandingPage() {
     }
   }, [data]);
 
-  const mutation = useMutation({
+  const showToast = (ok: boolean, msg: string) => {
+    setToast({ ok, msg });
+    setTimeout(() => setToast(null), ok ? 3000 : 4000);
+  };
+
+  const saveMutation = useMutation({
     mutationFn: updateBranding,
     onSuccess: (updated) => {
       queryClient.setQueryData(["branding"], updated);
-      setToast({ ok: true, msg: "Branding saved." });
-      setTimeout(() => setToast(null), 3000);
+      showToast(true, "Branding saved.");
     },
-    onError: (err: Error) => {
-      setToast({ ok: false, msg: err.message });
-      setTimeout(() => setToast(null), 4000);
-    },
+    onError: (err: Error) => showToast(false, err.message),
   });
+
+  const resetMutation = useMutation({
+    mutationFn: resetBranding,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["branding"] });
+      showToast(true, "Restored to defaults.");
+    },
+    onError: (err: Error) => showToast(false, err.message),
+  });
+
+  const busy = saveMutation.isPending || resetMutation.isPending;
 
   return (
     <div className="px-6 py-8 max-w-2xl mx-auto flex flex-col gap-8">
@@ -122,7 +136,7 @@ export default function BrandingPage() {
         <p className="text-sm text-destructive">Failed to load branding settings. Please refresh.</p>
       )}
 
-      {isLoading ? (
+      {queryPending ? (
         <p className="text-sm text-text-muted">Loading…</p>
       ) : (
         <div className="bg-card border border-border rounded-xl p-6 flex flex-col gap-6">
@@ -151,16 +165,23 @@ export default function BrandingPage() {
 
           <div className="flex items-center gap-3 pt-2">
             <button
-              onClick={() => mutation.mutate(form)}
-              disabled={mutation.isPending}
+              type="button"
+              onClick={() => saveMutation.mutate(form)}
+              disabled={busy}
               className="px-4 py-2 text-sm font-medium bg-accent text-white rounded-lg hover:bg-accent/90 disabled:opacity-50 transition-colors"
             >
-              {mutation.isPending ? "Saving…" : "Save Branding"}
+              {saveMutation.isPending ? "Saving…" : "Save Branding"}
+            </button>
+            <button
+              type="button"
+              onClick={() => resetMutation.mutate()}
+              disabled={busy}
+              className="px-4 py-2 text-sm font-medium border border-border text-foreground rounded-lg hover:bg-surface-subtle disabled:opacity-50 transition-colors"
+            >
+              {resetMutation.isPending ? "Resetting…" : "Restore Defaults"}
             </button>
             {toast && (
-              <span
-                className={`text-sm ${toast.ok ? "text-success" : "text-destructive"}`}
-              >
+              <span className={`text-sm ${toast.ok ? "text-success" : "text-destructive"}`}>
                 {toast.msg}
               </span>
             )}
