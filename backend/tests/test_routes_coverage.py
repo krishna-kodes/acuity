@@ -151,3 +151,66 @@ def test_metrics_missing_project_returns_404(client):
 def test_missing_project_returns_404(client, path):
     resp = client.get(path)
     assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# GET /projects/{id}/export/estimate
+# ---------------------------------------------------------------------------
+
+def _seed_epic_and_task(db_session, project_id: str):
+    """Helper: create one Epic + one Task for export tests."""
+    import json
+    from app.models.sync import Epic, Task
+    from app.models.enums import SyncStatus
+
+    epic = Epic(
+        project_id=int(project_id),
+        title="Auth Module",
+        estimated_points=8,
+        sync_status=SyncStatus.pending,
+    )
+    db_session.add(epic)
+    db_session.flush()
+
+    task = Task(
+        epic_id=epic.id,
+        title="Implement login",
+        estimated_points=5,
+        assignees=json.dumps(["alice"]),
+        github_issue_url="https://github.com/org/repo/issues/1",
+        sync_status=SyncStatus.pending,
+    )
+    db_session.add(task)
+    db_session.commit()
+
+
+def test_export_estimate_csv_returns_attachment(client, project_id, db_session):
+    _seed_epic_and_task(db_session, project_id)
+    resp = client.get(f"/api/v1/projects/{project_id}/export/estimate?format=csv")
+    assert resp.status_code == 200
+    assert "text/csv" in resp.headers.get("content-type", "")
+    assert "attachment" in resp.headers.get("content-disposition", "")
+    body = resp.text
+    assert "epic_title" in body
+    assert "task_title" in body
+
+
+def test_export_estimate_xlsx_returns_attachment(client, project_id, db_session):
+    _seed_epic_and_task(db_session, project_id)
+    resp = client.get(f"/api/v1/projects/{project_id}/export/estimate?format=xlsx")
+    assert resp.status_code == 200
+    assert "openxmlformats" in resp.headers.get("content-type", "")
+    assert "attachment" in resp.headers.get("content-disposition", "")
+    assert len(resp.content) > 0
+
+
+def test_export_estimate_phase_guard(client, project_id, db_session):
+    from app.models.enums import ProjectPhase
+    from app.models.project import Project
+    db_session.query(Project).filter(
+        Project.id == int(project_id)
+    ).update({"phase": ProjectPhase.chat})
+    db_session.commit()
+    resp = client.get(f"/api/v1/projects/{project_id}/export/estimate?format=csv")
+    assert resp.status_code == 409
+    assert "Phase 5" in resp.json()["detail"]

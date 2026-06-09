@@ -998,6 +998,38 @@ def export_proposal(
     )
 
 
+@router.get("/projects/{project_id}/export/estimate")
+def export_estimate(
+    project_id: str,
+    format: str = "xlsx",
+    db: Session = Depends(get_db),
+):
+    """Download the effort estimate as CSV or XLSX (Phase 5 must be complete)."""
+    if format not in ("csv", "xlsx"):
+        raise HTTPException(status_code=400, detail="format must be csv or xlsx")
+
+    project = _get_project_or_404(project_id, db)
+    if project.phase not in _POST_ESTIMATION_PHASES:
+        raise HTTPException(status_code=409, detail="Phase 5 not complete")
+
+    from app.services.estimate_export import build_estimate_csv, build_estimate_xlsx
+
+    if format == "csv":
+        buf = build_estimate_csv(project.id, db)
+        return StreamingResponse(
+            buf,
+            media_type="text/csv",
+            headers={"Content-Disposition": f"attachment; filename=estimate_{project_id}.csv"},
+        )
+
+    buf = build_estimate_xlsx(project.id, db)
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename=estimate_{project_id}.xlsx"},
+    )
+
+
 @router.get(
     "/projects/{project_id}/documents-list",
     response_model=list[ProjectDocumentItem],

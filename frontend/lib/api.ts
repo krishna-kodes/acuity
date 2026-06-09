@@ -115,6 +115,9 @@ export const resetDb = () =>
 export const getProposalExportUrl = (projectId: string): string =>
   `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"}/api/v1/projects/${projectId}/export/proposal`
 
+export const getEstimateExportUrl = (projectId: string, format: "csv" | "xlsx"): string =>
+  `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"}/api/v1/projects/${projectId}/export/estimate?format=${format}`
+
 // ── New phase endpoints (not yet in api.types — use raw fetch) ────────────────
 
 const _apiBase = () => process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"
