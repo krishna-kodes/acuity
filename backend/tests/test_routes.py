@@ -87,3 +87,78 @@ def test_sync_response_has_status(client, project_id):
 def test_factory_reset_returns_status(client):
     resp = client.delete("/api/v1/factory/reset-db")
     assert resp.json()["status"] == "reset"
+
+
+import json as _json
+
+
+def test_get_stack_returns_204_when_not_generated(client, project_id, db_session):
+    from app.models.project import Project
+    project = db_session.query(Project).first()
+    project.tech_stack = None
+    db_session.commit()
+    resp = client.get(f"/api/v1/projects/{project_id}/stack")
+    assert resp.status_code == 204
+
+
+def test_get_stack_returns_200_with_cached_data(client, project_id, db_session):
+    from app.models.project import Project
+    project = db_session.query(Project).first()
+    project.tech_stack = {
+        "frontend": ["Next.js"],
+        "backend": ["FastAPI"],
+        "database": ["SQLite"],
+        "infra": ["Railway"],
+        "rationale": "solid defaults",
+    }
+    db_session.commit()
+    resp = client.get(f"/api/v1/projects/{project_id}/stack")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["frontend"] == ["Next.js"]
+    assert data["rationale"] == "solid defaults"
+
+
+def test_stack_stream_returns_event_stream_cached(client, project_id, db_session):
+    from app.models.project import Project
+    from app.models.enums import ProjectPhase
+    project = db_session.query(Project).first()
+    project.tech_stack = {
+        "frontend": ["Next.js"],
+        "backend": ["FastAPI"],
+        "database": ["SQLite"],
+        "infra": ["Railway"],
+        "rationale": "cached rationale",
+    }
+    project.phase = ProjectPhase.estimation
+    db_session.commit()
+
+    resp = client.post(f"/api/v1/projects/{project_id}/stack/stream")
+    assert resp.status_code == 200
+    assert "text/event-stream" in resp.headers["content-type"]
+
+    lines = [l for l in resp.text.split("\n") if l.startswith("data: ")]
+    events = [_json.loads(l[6:]) for l in lines]
+    types = [e["type"] for e in events]
+    assert "status" in types
+    assert "category" in types
+    assert "rationale" in types
+    assert "done" in types
+
+    category_events = [e for e in events if e["type"] == "category"]
+    keys = {e["key"] for e in category_events}
+    assert keys == {"frontend", "backend", "database", "infra"}
+
+    done_event = next(e for e in events if e["type"] == "done")
+    assert done_event["stack"]["frontend"] == ["Next.js"]
+
+
+def test_stack_stream_returns_409_when_modules_not_done(client, project_id, db_session):
+    from app.models.project import Project
+    from app.models.enums import ProjectPhase
+    project = db_session.query(Project).first()
+    project.phase = ProjectPhase.chat
+    db_session.commit()
+
+    resp = client.post(f"/api/v1/projects/{project_id}/stack/stream")
+    assert resp.status_code == 409

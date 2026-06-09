@@ -549,6 +549,63 @@ export async function approveModules(projectId: string): Promise<ModulesData> {
   return res.json()
 }
 
+// ── Tech Stack ────────────────────────────────────────────────────────────────
+
+export interface TechStackData {
+  frontend: string[];
+  backend: string[];
+  database: string[];
+  infra: string[];
+  rationale: string;
+}
+
+export async function getStack(projectId: string): Promise<TechStackData | null> {
+  const res = await fetch(`${_apiBase()}/api/v1/projects/${projectId}/stack`)
+  if (res.status === 204) return null
+  if (!res.ok) throw new Error(`Get stack failed: ${res.status}`)
+  return res.json()
+}
+
+export async function suggestStackStream(
+  projectId: string,
+  onStatus: (message: string) => void,
+  onCategory: (key: string, items: string[]) => void,
+  onRationale: (text: string) => void,
+  onDone: (stack: TechStackData) => void,
+  force = false,
+): Promise<void> {
+  const url = force
+    ? `${_apiBase()}/api/v1/projects/${projectId}/stack/stream?force=true`
+    : `${_apiBase()}/api/v1/projects/${projectId}/stack/stream`
+  const res = await fetch(url, { method: "POST" })
+  if (!res.ok) throw new Error(`Stack stream failed: ${res.status}`)
+  if (!res.body) throw new Error("Stack stream: response body is null")
+
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ""
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split("\n")
+    buffer = lines.pop() ?? ""
+    for (const line of lines) {
+      if (!line.startsWith("data: ")) continue
+      const data = line.slice(6).trim()
+      if (!data) continue
+      try {
+        const event = JSON.parse(data)
+        if (event.type === "status") onStatus(event.message as string)
+        else if (event.type === "category") onCategory(event.key as string, event.items as string[])
+        else if (event.type === "rationale") onRationale(event.text as string)
+        else if (event.type === "done") onDone(event.stack as TechStackData)
+      } catch { /* skip malformed SSE line */ }
+    }
+  }
+}
+
 // ── Branding ─────────────────────────────────────────────────────────────────
 
 export interface BrandingSettings {
