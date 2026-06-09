@@ -1,3 +1,4 @@
+import asyncio
 import dataclasses
 import json
 import os
@@ -389,6 +390,99 @@ def get_live_status(
         active_phase=active_phase,
         token_budget=100_000,
         is_recent=is_recent,
+    )
+
+
+@router.get("/projects/{project_id}/live-status/stream")
+async def live_status_stream(
+    project_id: str,
+    db: Session = Depends(get_db),
+):
+    from datetime import datetime, timezone, timedelta
+    from app.database import SessionLocal
+    from app.models.observability import Metric, LatencyLog
+    from app.schemas.live_status import LiveStatusResponse, PHASE_AGENT_NAMES
+
+    _get_project_or_404(project_id, db)
+    pid = int(project_id)
+
+    def _build_snapshot() -> tuple[LiveStatusResponse, int | None, int | None]:
+        session = SessionLocal()
+        try:
+            rows = session.query(Metric).filter(Metric.project_id == pid).all()
+            total_tokens = sum(r.input_tokens + r.output_tokens for r in rows)
+            total_cost = sum(r.cost_usd for r in rows)
+            llm_call_count = len(rows)
+
+            latest_metric = (
+                session.query(Metric)
+                .filter(Metric.project_id == pid)
+                .order_by(Metric.created_at.desc())
+                .first()
+            )
+            latest_latency = (
+                session.query(LatencyLog)
+                .filter(LatencyLog.project_id == pid)
+                .order_by(LatencyLog.created_at.desc())
+                .first()
+            )
+
+            agent: str | None = None
+            model: str | None = None
+            active_phase: str | None = None
+            is_recent = False
+
+            if latest_metric:
+                active_phase = latest_metric.phase
+                agent = PHASE_AGENT_NAMES.get(latest_metric.phase)
+                model = latest_metric.model
+                cutoff = datetime.now(timezone.utc) - timedelta(seconds=120)
+                ts = latest_metric.created_at
+                if ts.tzinfo is None:
+                    ts = ts.replace(tzinfo=timezone.utc)
+                is_recent = ts >= cutoff
+
+            return (
+                LiveStatusResponse(
+                    agent=agent,
+                    model=model,
+                    total_tokens=total_tokens,
+                    session_cost_usd=round(total_cost, 4),
+                    last_node=latest_latency.node_name if latest_latency else None,
+                    last_latency_ms=latest_latency.duration_ms if latest_latency else None,
+                    llm_call_count=llm_call_count,
+                    active_phase=active_phase,
+                    token_budget=100_000,
+                    is_recent=is_recent,
+                ),
+                latest_metric.id if latest_metric else None,
+                latest_latency.id if latest_latency else None,
+            )
+        finally:
+            session.close()
+
+    async def generate():
+        last_metric_id: int | None = None
+        last_latency_id: int | None = None
+        try:
+            while True:
+                snapshot, cur_metric_id, cur_latency_id = await asyncio.get_event_loop().run_in_executor(
+                    None, _build_snapshot
+                )
+
+                if cur_metric_id != last_metric_id or cur_latency_id != last_latency_id:
+                    last_metric_id = cur_metric_id
+                    last_latency_id = cur_latency_id
+                    yield f"data: {snapshot.model_dump_json()}\n\n"
+
+                await asyncio.sleep(1)
+        except asyncio.CancelledError:
+            pass
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
 
@@ -1927,6 +2021,248 @@ async def generate_epics(
         db.commit()
 
     return {"epics": epics_data, "count": len(epics_data)}
+
+
+@router.post("/projects/{project_id}/epics/stream")
+async def stream_epics(
+    project_id: str,
+    force: bool = False,
+    db: Session = Depends(get_db),
+):
+    """SSE stream: status → epic events (one per epic+tasks) → done.
+
+    Cache path: if epics already exist in DB and force=False, replays them instantly.
+    Fresh path: calls LLM directly (bypasses ReAct loop), uses bracket-depth tracking
+    to emit one 'epic' SSE event per complete JSON object as tokens arrive.
+    DB persist happens BEFORE the 'done' event so getEpics() works immediately after.
+    """
+    import json as _json_mod
+    from datetime import date
+    from app.services.llm_factory import get_llm
+    from app.services.workflow import _EPIC_GENERATION_PROMPT
+
+    project = _get_project_or_404(project_id, db)
+
+    if project.phase not in _POST_ESTIMATION_PHASES:
+        raise HTTPException(
+            status_code=409,
+            detail="Phase 5 (effort estimation) must be complete before generating epics",
+        )
+
+    # ── Cache path ──────────────────────────────────────────────────────────
+    existing_epics = db.query(Epic).filter(Epic.project_id == int(project_id)).all()
+    if not force and existing_epics:
+        async def _cached_gen():
+            yield f'data: {json.dumps({"type": "status", "message": "Loading cached epics..."})}\n\n'
+            for epic in existing_epics:
+                tasks_data = []
+                for t in epic.tasks:
+                    try:
+                        labels = _json_mod.loads(t.labels) if t.labels else []
+                    except Exception:
+                        labels = []
+                    tasks_data.append({
+                        "title": t.title,
+                        "description": t.description or "",
+                        "story_points": t.estimated_points or 3,
+                        "labels": labels,
+                    })
+                yield f'data: {json.dumps({"type": "epic", "title": epic.title, "description": epic.description or "", "due_date": "", "tasks": tasks_data})}\n\n'
+            yield f'data: {json.dumps({"type": "done", "count": len(existing_epics)})}\n\n'
+
+        return StreamingResponse(
+            _cached_gen(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+
+    # ── Build prompt context ────────────────────────────────────────────────
+    proposal_sections: dict = {}
+    try:
+        proposal = (
+            db.query(Proposal)
+            .filter(Proposal.project_id == project.id)
+            .order_by(Proposal.id.desc())
+            .first()
+        )
+        if proposal and proposal.sections_json:
+            for s in json.loads(proposal.sections_json):
+                proposal_sections[s["section_id"]] = s
+    except Exception:
+        pass
+
+    _SECTION_KEYS = ("overview", "technical_requirements", "key_features", "problem_statement")
+    section_parts = []
+    for k in _SECTION_KEYS:
+        sec = proposal_sections.get(k) or {}
+        title = sec.get("title") or k.replace("_", " ").title()
+        content = sec.get("content", "").strip()
+        if content:
+            section_parts.append(f"### {title}\n{content}")
+    proposal_summary = "\n\n".join(section_parts) if section_parts else "No proposal context available."
+
+    tech_stack = project.tech_stack or {}
+    tech_stack_summary = (
+        ", ".join(
+            tech_stack.get("frontend", [])
+            + tech_stack.get("backend", [])
+            + tech_stack.get("database", [])
+            + tech_stack.get("infra", [])
+        )
+        or "Standard web stack"
+    )
+    today = date.today().isoformat()
+
+    # ── Fresh generation ────────────────────────────────────────────────────
+    async def _generate():
+        yield f'data: {json.dumps({"type": "status", "message": "Generating epics and tasks..."})}\n\n'
+
+        prompt = (
+            _EPIC_GENERATION_PROMPT.format(
+                proposal_summary=proposal_summary,
+                tech_stack_summary=tech_stack_summary,
+                today=today,
+            )
+            + "\n\nReturn ONLY a valid JSON array of epic objects."
+            " Each epic: {title, description, due_date, tasks: [{title, description, story_points, labels}]}."
+            " No markdown fences, no explanation."
+        )
+
+        llm = get_llm(fast=False)
+        full_buffer = ""
+        epics: list[dict] = []
+
+        # Bracket-depth tracking: detect complete top-level JSON objects inside the array.
+        # Handles nested objects (tasks array) without regex.
+        # Tracks string context to ignore structural chars inside string values.
+        array_started = False
+        brace_depth = 0
+        current_epic = ""
+        in_string = False
+        escape_next = False
+
+        async for chunk in llm.astream(prompt):
+            token = chunk.content if hasattr(chunk, "content") else str(chunk)
+            full_buffer += token
+
+            for char in token:
+                if escape_next:
+                    escape_next = False
+                    if brace_depth > 0:
+                        current_epic += char
+                    continue
+                if char == "\\" and in_string:
+                    escape_next = True
+                    if brace_depth > 0:
+                        current_epic += char
+                    continue
+                if char == '"':
+                    in_string = not in_string
+                    if brace_depth > 0:
+                        current_epic += char
+                    continue
+                if in_string:
+                    if brace_depth > 0:
+                        current_epic += char
+                    continue
+                # Structural chars (not inside a string)
+                if not array_started:
+                    if char == "[":
+                        array_started = True
+                    continue
+                if brace_depth == 0 and char == "{":
+                    current_epic = "{"
+                    brace_depth = 1
+                elif brace_depth > 0:
+                    current_epic += char
+                    if char == "{":
+                        brace_depth += 1
+                    elif char == "}":
+                        brace_depth -= 1
+                        if brace_depth == 0:
+                            try:
+                                obj = json.loads(current_epic)
+                                if "title" in obj:
+                                    epic_event = {
+                                        "title": obj["title"],
+                                        "description": obj.get("description", ""),
+                                        "due_date": obj.get("due_date", ""),
+                                        "tasks": obj.get("tasks", []),
+                                    }
+                                    epics.append(epic_event)
+                                    yield f'data: {json.dumps({"type": "epic", **epic_event})}\n\n'
+                            except Exception:
+                                pass
+                            current_epic = ""
+
+        # Fallback: parse full buffer if bracket tracking caught nothing
+        if not epics:
+            try:
+                cleaned = re.sub(r"```(?:json)?\s*", "", full_buffer).strip().rstrip("`").strip()
+                parsed = json.loads(cleaned)
+                if isinstance(parsed, list):
+                    for obj in parsed:
+                        if isinstance(obj, dict) and "title" in obj:
+                            epic_event = {
+                                "title": obj["title"],
+                                "description": obj.get("description", ""),
+                                "due_date": obj.get("due_date", ""),
+                                "tasks": obj.get("tasks", []),
+                            }
+                            epics.append(epic_event)
+                            yield f'data: {json.dumps({"type": "epic", **epic_event})}\n\n'
+            except Exception:
+                pass
+
+        # ── Persist BEFORE done event so getEpics() works immediately ───────
+        if epics:
+            if force:
+                old_ids = [
+                    row[0]
+                    for row in db.query(Epic.id).filter(Epic.project_id == int(project_id)).all()
+                ]
+                if old_ids:
+                    db.query(Task).filter(Task.epic_id.in_(old_ids)).delete(
+                        synchronize_session=False
+                    )
+                    db.query(Epic).filter(Epic.project_id == int(project_id)).delete(
+                        synchronize_session=False
+                    )
+                    db.flush()
+
+            for epic_dict in epics:
+                epic_orm = Epic(
+                    project_id=int(project_id),
+                    title=epic_dict["title"],
+                    description=epic_dict.get("description", ""),
+                    sync_status="pending",
+                )
+                db.add(epic_orm)
+                db.flush()
+                for task_dict in epic_dict.get("tasks", []):
+                    db.add(
+                        Task(
+                            epic_id=epic_orm.id,
+                            title=task_dict.get("title", ""),
+                            description=task_dict.get("description", ""),
+                            estimated_points=task_dict.get("story_points", 3),
+                            labels=json.dumps(task_dict.get("labels", [])),
+                            sync_status="pending",
+                        )
+                    )
+            db.commit()
+
+            if project.phase == ProjectPhase.estimation:
+                project.phase = ProjectPhase.epics
+                db.commit()
+
+        yield f'data: {json.dumps({"type": "done", "count": len(epics)})}\n\n'
+
+    return StreamingResponse(
+        _generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.get("/projects/{project_id}/epics")
