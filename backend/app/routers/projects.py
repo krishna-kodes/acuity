@@ -4,7 +4,7 @@ import os
 import re
 from urllib.parse import quote
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Response, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -1392,6 +1392,25 @@ async def suggest_stack(
         database=tech_stack.get("database", ["SQLite"]),
         infra=tech_stack.get("infra", ["Railway"]),
         rationale=tech_stack.get("rationale", "Stub — LangGraph not yet invoked for this project."),
+    )
+
+
+@router.get("/projects/{project_id}/stack")
+def get_stack(
+    project_id: str,
+    db: Session = Depends(get_db),
+):
+    """Return cached tech stack or 204 if not yet generated."""
+    project = _get_project_or_404(project_id, db)
+    cached = project.tech_stack or {}
+    if not cached:
+        return Response(status_code=204)
+    return TechStackResponse(
+        frontend=cached.get("frontend", []),
+        backend=cached.get("backend", []),
+        database=cached.get("database", []),
+        infra=cached.get("infra", []),
+        rationale=cached.get("rationale", ""),
     )
 
 

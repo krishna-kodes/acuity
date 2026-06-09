@@ -87,3 +87,33 @@ def test_sync_response_has_status(client, project_id):
 def test_factory_reset_returns_status(client):
     resp = client.delete("/api/v1/factory/reset-db")
     assert resp.json()["status"] == "reset"
+
+
+import json as _json
+
+
+def test_get_stack_returns_204_when_not_generated(client, project_id, db_session):
+    from app.models.project import Project
+    project = db_session.query(Project).first()
+    project.tech_stack = None
+    db_session.commit()
+    resp = client.get(f"/api/v1/projects/{project_id}/stack")
+    assert resp.status_code == 204
+
+
+def test_get_stack_returns_200_with_cached_data(client, project_id, db_session):
+    from app.models.project import Project
+    project = db_session.query(Project).first()
+    project.tech_stack = {
+        "frontend": ["Next.js"],
+        "backend": ["FastAPI"],
+        "database": ["SQLite"],
+        "infra": ["Railway"],
+        "rationale": "solid defaults",
+    }
+    db_session.commit()
+    resp = client.get(f"/api/v1/projects/{project_id}/stack")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["frontend"] == ["Next.js"]
+    assert data["rationale"] == "solid defaults"
