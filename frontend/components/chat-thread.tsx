@@ -1,3 +1,5 @@
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
 
 export type MessageRole = "ai" | "pm";
@@ -119,7 +121,27 @@ function MessageBubble({ message }: { message: ChatMessage }) {
               : "bg-primary text-primary-foreground rounded-xl rounded-tr-sm"
           )}
         >
-          {message.text}
+          {isAI ? (
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm]}
+              components={{
+                p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+                h1: ({ children }) => <h1 className="text-base font-semibold mb-1 mt-2 first:mt-0">{children}</h1>,
+                h2: ({ children }) => <h2 className="text-sm font-semibold mb-1 mt-2 first:mt-0">{children}</h2>,
+                h3: ({ children }) => <h3 className="text-sm font-semibold mb-1 mt-2 first:mt-0">{children}</h3>,
+                ul: ({ children }) => <ul className="list-disc pl-4 mb-2 space-y-0.5">{children}</ul>,
+                ol: ({ children }) => <ol className="list-decimal pl-4 mb-2 space-y-0.5">{children}</ol>,
+                li: ({ children }) => <li className="text-sm">{children}</li>,
+                strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
+                code: ({ children }) => <code className="bg-surface-subtle px-1 py-0.5 rounded text-xs font-mono">{children}</code>,
+                hr: () => <hr className="border-border my-2" />,
+              }}
+            >
+              {message.text}
+            </ReactMarkdown>
+          ) : (
+            message.text
+          )}
         </div>
         {isAI && message.groundednessWarning && (
           <GroundednessWarningBanner warning={message.groundednessWarning} />
