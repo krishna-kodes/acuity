@@ -207,6 +207,10 @@ All routes prefixed `/api/v1/`. OpenAPI spec auto-generated at `/docs`.
 | POST | `/projects/{id}/stack` | Run tech stack suggestion (non-streaming) |
 | POST | `/projects/{id}/stack/stream` | Stream tech stack suggestion (SSE: status → category×4 → rationale → done) |
 | POST | `/projects/{id}/estimate` | Run effort estimation |
+| POST | `/projects/{id}/estimate/stream` | Stream effort estimation (SSE: status → epic×N → summary → done) |
+| POST | `/projects/{id}/epics` | Generate epics and tasks (non-streaming) |
+| POST | `/projects/{id}/epics/stream` | Stream epic generation (SSE: status → epic×N → done; cache path replays DB epics) |
+| GET | `/projects/{id}/epics` | Retrieve persisted epics with tasks and sync status |
 | POST | `/projects/{id}/sync` | Sync epics/tasks to GitHub |
 | GET | `/projects/{id}/metrics` | Retrieve project metrics |
 | POST | `/factory/seed-employees` | Seed employee data |

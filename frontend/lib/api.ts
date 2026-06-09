@@ -84,6 +84,48 @@ export const estimateEffort = (projectId: string) =>
     params: { path: { project_id: projectId } },
   })
 
+export async function estimateEffortStream(
+  projectId: string,
+  callbacks: {
+    onStatus: (message: string) => void
+    onEpic: (epic: { title: string; estimated_points: number }) => void
+    onSummary: (data: { total_points: number; total_weeks: number; confidence: number; reasoning: string }) => void
+    onDone: (data: { epics: Array<{ title: string; estimated_points: number }>; total_points: number; total_weeks: number }) => void
+  },
+  force = false,
+): Promise<void> {
+  const url = force
+    ? `${_apiBase()}/api/v1/projects/${projectId}/estimate/stream?force=true`
+    : `${_apiBase()}/api/v1/projects/${projectId}/estimate/stream`
+  const res = await fetch(url, { method: "POST" })
+  if (!res.ok) throw new Error(`Estimate stream failed: ${res.status}`)
+  if (!res.body) throw new Error("Estimate stream: response body is null")
+
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ""
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split("\n")
+    buffer = lines.pop() ?? ""
+    for (const line of lines) {
+      if (!line.startsWith("data: ")) continue
+      const data = line.slice(6).trim()
+      if (!data) continue
+      try {
+        const event = JSON.parse(data)
+        if (event.type === "status") callbacks.onStatus(event.message as string)
+        if (event.type === "epic") callbacks.onEpic({ title: event.title as string, estimated_points: event.estimated_points as number })
+        if (event.type === "summary") callbacks.onSummary(event)
+        if (event.type === "done") callbacks.onDone(event)
+      } catch { /* skip malformed SSE line */ }
+    }
+  }
+}
+
 export const syncToProvider = (projectId: string) =>
   apiClient.POST("/api/v1/projects/{project_id}/sync", {
     params: { path: { project_id: projectId } },
@@ -132,7 +174,7 @@ export const getEstimateExportUrl = (projectId: string, format: "csv" | "xlsx"):
 
 // ── New phase endpoints (not yet in api.types — use raw fetch) ────────────────
 
-const _apiBase = () => process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"
+export const _apiBase = () => process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"
 
 export type ProjectDetail = {
   id: string
@@ -185,6 +227,58 @@ export async function getEpics(projectId: string): Promise<{ epics: Array<{ id: 
   const res = await fetch(`${_apiBase()}/api/v1/projects/${projectId}/epics`)
   if (!res.ok) throw new Error(`Fetch epics failed: ${res.status}`)
   return res.json()
+}
+
+export type EpicStreamItem = {
+  title: string
+  description: string
+  due_date: string
+  tasks: Array<{
+    title: string
+    description: string
+    story_points: number
+    labels: string[]
+  }>
+}
+
+export async function streamEpics(
+  projectId: string,
+  callbacks: {
+    onStatus: (message: string) => void
+    onEpic: (epic: EpicStreamItem) => void
+    onDone: (count: number) => void
+  },
+  force = false,
+): Promise<void> {
+  const url = force
+    ? `${_apiBase()}/api/v1/projects/${projectId}/epics/stream?force=true`
+    : `${_apiBase()}/api/v1/projects/${projectId}/epics/stream`
+  const res = await fetch(url, { method: "POST" })
+  if (!res.ok) throw new Error(`Epics stream failed: ${res.status}`)
+  if (!res.body) throw new Error("Epics stream: response body is null")
+
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ""
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split("\n")
+    buffer = lines.pop() ?? ""
+    for (const line of lines) {
+      if (!line.startsWith("data: ")) continue
+      const data = line.slice(6).trim()
+      if (!data) continue
+      try {
+        const event = JSON.parse(data)
+        if (event.type === "status") callbacks.onStatus(event.message as string)
+        if (event.type === "epic") callbacks.onEpic(event as EpicStreamItem)
+        if (event.type === "done") callbacks.onDone(event.count as number)
+      } catch { /* skip malformed SSE line */ }
+    }
+  }
 }
 
 export type SyncProvider = "github" | "jira"

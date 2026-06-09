@@ -162,3 +162,190 @@ def test_stack_stream_returns_409_when_modules_not_done(client, project_id, db_s
 
     resp = client.post(f"/api/v1/projects/{project_id}/stack/stream")
     assert resp.status_code == 409
+
+
+# ---------------------------------------------------------------------------
+# POST /projects/{id}/estimate/stream
+# ---------------------------------------------------------------------------
+
+def test_estimate_stream_returns_409_when_team_not_done(client, project_id, db_session):
+    from app.models.project import Project
+    from app.models.enums import ProjectPhase
+    project = db_session.query(Project).first()
+    project.phase = ProjectPhase.chat
+    db_session.commit()
+    resp = client.post(f"/api/v1/projects/{project_id}/estimate/stream")
+    assert resp.status_code == 409
+
+
+def test_estimate_stream_replays_cached_events(client, project_id, db_session):
+    import json as _json
+    from app.models.project import Project
+    from app.models.enums import ProjectPhase
+    project = db_session.query(Project).first()
+    project.phase = ProjectPhase.estimation
+    project.effort_estimates = {
+        "total_weeks": 8,
+        "total_points": 32,
+        "confidence": 0.9,
+        "breakdown": {"Backend API": 32},
+        "reasoning": "test reasoning",
+    }
+    db_session.commit()
+    resp = client.post(f"/api/v1/projects/{project_id}/estimate/stream")
+    assert resp.status_code == 200
+    assert "text/event-stream" in resp.headers["content-type"]
+    lines = [l for l in resp.text.split("\n") if l.startswith("data: ")]
+    events = [_json.loads(l[6:]) for l in lines]
+    types = [e["type"] for e in events]
+    assert "status" in types
+    assert "epic" in types
+    assert "summary" in types
+    assert "done" in types
+    epic_events = [e for e in events if e["type"] == "epic"]
+    assert epic_events[0]["title"] == "Backend API"
+    assert epic_events[0]["estimated_points"] == 32
+    done_event = next(e for e in events if e["type"] == "done")
+    assert done_event["total_points"] == 32
+    assert done_event["total_weeks"] == 8.0
+
+
+def test_estimate_stream_live_emits_epic_events(client, project_id, db_session):
+    import json as _json
+    from unittest.mock import MagicMock, patch
+    from app.models.project import Project
+    from app.models.enums import ProjectPhase
+    project = db_session.query(Project).first()
+    project.phase = ProjectPhase.team
+    project.effort_estimates = None
+    project.team_suggestion = {"members": ["dev1", "dev2", "dev3"]}
+    db_session.commit()
+    chunks = [
+        MagicMock(content='{"total_weeks": 6, "total_points": 24, "confidence": 0.8, "breakdown": ['),
+        MagicMock(content='{"phase": "Auth Service", "points": 12},'),
+        MagicMock(content='{"phase": "API Gateway", "points": 12}'),
+        MagicMock(content='], "reasoning": "Based on similar projects."}'),
+    ]
+    async def _astream(prompt):
+        for c in chunks:
+            yield c
+    mock_llm = MagicMock()
+    mock_llm.astream = _astream
+    with patch("app.services.llm_factory.get_llm", return_value=mock_llm):
+        resp = client.post(f"/api/v1/projects/{project_id}/estimate/stream")
+    assert resp.status_code == 200
+    assert "text/event-stream" in resp.headers["content-type"]
+    lines = [l for l in resp.text.split("\n") if l.startswith("data: ")]
+    events = [_json.loads(l[6:]) for l in lines]
+    epic_events = [e for e in events if e["type"] == "epic"]
+    assert len(epic_events) == 2
+    assert epic_events[0]["title"] == "Auth Service"
+    assert epic_events[0]["estimated_points"] == 12
+    assert epic_events[1]["title"] == "API Gateway"
+    done_event = next(e for e in events if e["type"] == "done")
+    assert done_event["total_points"] == 24
+    assert done_event["total_weeks"] == 6.0
+
+
+# ---------------------------------------------------------------------------
+# POST /projects/{id}/epics/stream
+# ---------------------------------------------------------------------------
+
+def test_epics_stream_returns_409_when_estimation_not_done(client, project_id, db_session):
+    from app.models.project import Project
+    from app.models.enums import ProjectPhase
+    project = db_session.query(Project).first()
+    project.phase = ProjectPhase.chat
+    db_session.commit()
+    resp = client.post(f"/api/v1/projects/{project_id}/epics/stream")
+    assert resp.status_code == 409
+
+
+def test_epics_stream_replays_cached_events(client, project_id, db_session):
+    import json as _json
+    from app.models.project import Project
+    from app.models.enums import ProjectPhase
+    from app.models.sync import Epic, Task
+
+    project = db_session.query(Project).first()
+    project.phase = ProjectPhase.epics
+
+    epic = Epic(project_id=project.id, title="Auth Epic", description="Auth system", sync_status="pending")
+    db_session.add(epic)
+    db_session.flush()
+    task = Task(
+        epic_id=epic.id,
+        title="Login page",
+        description="",
+        estimated_points=3,
+        labels='["frontend"]',
+        sync_status="pending",
+    )
+    db_session.add(task)
+    db_session.commit()
+
+    resp = client.post(f"/api/v1/projects/{project_id}/epics/stream")
+    assert resp.status_code == 200
+    assert "text/event-stream" in resp.headers["content-type"]
+
+    lines = [l for l in resp.text.split("\n") if l.startswith("data: ")]
+    events = [_json.loads(l[6:]) for l in lines]
+    types = [e["type"] for e in events]
+    assert "status" in types
+    assert "epic" in types
+    assert "done" in types
+
+    epic_events = [e for e in events if e["type"] == "epic"]
+    assert epic_events[0]["title"] == "Auth Epic"
+    assert epic_events[0]["tasks"][0]["title"] == "Login page"
+    assert epic_events[0]["tasks"][0]["story_points"] == 3
+
+    done_event = next(e for e in events if e["type"] == "done")
+    assert done_event["count"] == 1
+
+
+def test_epics_stream_live_emits_epic_events(client, project_id, db_session):
+    import json as _json
+    from unittest.mock import MagicMock, patch
+    from app.models.project import Project
+    from app.models.enums import ProjectPhase
+
+    project = db_session.query(Project).first()
+    project.phase = ProjectPhase.estimation
+    project.effort_estimates = {"total_points": 24, "total_weeks": 6}
+    db_session.commit()
+
+    chunks = [
+        MagicMock(content='[{"title": "Auth Epic", "description": "Handle authentication", "due_date": "2026-07-15", '),
+        MagicMock(content='"tasks": [{"title": "Login", "description": "Login page", "story_points": 3, "labels": ["frontend"]}]},'),
+        MagicMock(content='{"title": "API Epic", "description": "REST API layer", "due_date": "2026-08-01", '),
+        MagicMock(content='"tasks": [{"title": "CRUD routes", "description": "Endpoints", "story_points": 5, "labels": ["backend"]}]}]'),
+    ]
+
+    async def _astream(prompt):
+        for c in chunks:
+            yield c
+
+    mock_llm = MagicMock()
+    mock_llm.astream = _astream
+    with patch("app.services.llm_factory.get_llm", return_value=mock_llm):
+        resp = client.post(f"/api/v1/projects/{project_id}/epics/stream")
+
+    assert resp.status_code == 200
+    assert "text/event-stream" in resp.headers["content-type"]
+
+    lines = [l for l in resp.text.split("\n") if l.startswith("data: ")]
+    events = [_json.loads(l[6:]) for l in lines]
+    epic_events = [e for e in events if e["type"] == "epic"]
+    assert len(epic_events) == 2
+    assert epic_events[0]["title"] == "Auth Epic"
+    assert epic_events[0]["tasks"][0]["title"] == "Login"
+    assert epic_events[1]["title"] == "API Epic"
+
+    done_event = next(e for e in events if e["type"] == "done")
+    assert done_event["count"] == 2
+
+    from app.models.sync import Epic as EpicModel
+    db_epics = db_session.query(EpicModel).filter(EpicModel.project_id == project.id).all()
+    assert len(db_epics) == 2
+    assert db_epics[0].title == "Auth Epic"

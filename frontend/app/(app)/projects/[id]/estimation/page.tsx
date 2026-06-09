@@ -2,11 +2,12 @@
 
 import { useState, useEffect, useRef, use } from "react";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { PhaseProgressStepper } from "@/components/phase-progress-stepper";
 import { MetricsStatCard } from "@/components/metrics-stat-card";
 import { getPhasesForRoute, getNextPhaseRoute } from "@/lib/project-phases";
 import { cn } from "@/lib/utils";
-import { estimateEffort, getModules } from "@/lib/api";
+import { estimateEffortStream, getModules } from "@/lib/api";
 import type { Module } from "@/lib/api";
 
 interface EpicEstimate {
@@ -15,34 +16,86 @@ interface EpicEstimate {
   confidence?: number;
 }
 
-interface EffortData {
-  epics: EpicEstimate[];
+interface SummaryData {
   total_points: number;
   total_weeks: number;
-  confidence?: number;
+  confidence: number;
+  reasoning: string;
 }
+
+type EstimateStatus = "idle" | "fetching" | "computing" | "done";
 
 export default function EstimationPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const router = useRouter();
   const [proceeding, setProceeding] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [effort, setEffort] = useState<EffortData | null>(null);
+  const [generating, setGenerating] = useState(false);
+  const [estimateStatus, setEstimateStatus] = useState<EstimateStatus>("idle");
+  const [completedCount, setCompletedCount] = useState(0);
+  const [streamedEpics, setStreamedEpics] = useState<EpicEstimate[]>([]);
+  const [summaryData, setSummaryData] = useState<SummaryData | null>(null);
   const [modules, setModules] = useState<Module[]>([]);
   const estimationFiredRef = useRef(false);
 
+  async function runEstimation(isCancelled?: () => boolean, force = false) {
+    setGenerating(true);
+    setEstimateStatus("fetching");
+    setStreamedEpics([]);
+    setSummaryData(null);
+    setCompletedCount(0);
+    try {
+      await estimateEffortStream(
+        id,
+        {
+          onStatus: (message) => {
+            if (isCancelled?.()) return;
+            setEstimateStatus(message.toLowerCase().includes("fetching") ? "fetching" : "computing");
+          },
+          onEpic: (epic) => {
+            if (isCancelled?.()) return;
+            setStreamedEpics((prev) => [...prev, epic]);
+            setCompletedCount((n) => n + 1);
+            setEstimateStatus("computing");
+          },
+          onSummary: (data) => {
+            if (isCancelled?.()) return;
+            setSummaryData(data);
+          },
+          onDone: (data) => {
+            if (isCancelled?.()) return;
+            setStreamedEpics(data.epics);
+            setSummaryData((prev) => prev ?? { total_points: data.total_points, total_weeks: data.total_weeks, confidence: 0, reasoning: "" });
+            setEstimateStatus("done");
+          },
+        },
+        force,
+      );
+    } catch {
+      if (!isCancelled?.()) {
+        toast.error("Effort estimation failed — try again");
+        setEstimateStatus("idle");
+      }
+    } finally {
+      if (!isCancelled?.()) setGenerating(false);
+    }
+  }
+
   useEffect(() => {
-    if (estimationFiredRef.current) return;
-    estimationFiredRef.current = true;
+    let cancelled = false;
 
-    estimateEffort(id)
-      .then(({ data }) => { if (data) setEffort(data as unknown as EffortData); })
-      .catch(() => {})
-      .finally(() => { setLoading(false); });
+    async function load() {
+      if (estimationFiredRef.current) return;
+      estimationFiredRef.current = true;
+      await runEstimation(() => cancelled);
+    }
 
+    load();
     getModules(id)
       .then((data) => { setModules(data.modules); })
       .catch(() => {});
+
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
   async function handleProceed() {
@@ -51,10 +104,14 @@ export default function EstimationPage({ params }: { params: Promise<{ id: strin
     router.push(getNextPhaseRoute("estimation", id));
   }
 
-  const epics = effort?.epics ?? [];
-  const overallConfidence = effort?.confidence ?? epics[0]?.confidence;
-  const confidenceLabel = overallConfidence != null
-    ? `${(overallConfidence * 100).toFixed(0)}%`
+  const progressWidth =
+    estimateStatus === "idle" ? "0%"
+    : estimateStatus === "fetching" ? "10%"
+    : estimateStatus === "done" ? "100%"
+    : `${Math.min(10 + completedCount * 8, 90)}%`;
+
+  const confidenceLabel = summaryData?.confidence != null
+    ? `${(summaryData.confidence * 100).toFixed(0)}%`
     : "—";
 
   return (
@@ -62,18 +119,90 @@ export default function EstimationPage({ params }: { params: Promise<{ id: strin
       <PhaseProgressStepper phases={getPhasesForRoute("estimation")} />
 
       <div className="flex flex-col gap-4">
-        <div>
-          <h2 className="text-base font-semibold text-foreground">Effort Estimation</h2>
-          <p className="text-xs text-text-muted mt-0.5">
-            AI-generated estimates based on requirements complexity and historical project data.
-          </p>
+        <div className="flex items-start justify-between gap-4 flex-wrap">
+          <div>
+            <h2 className="text-base font-semibold text-foreground">Effort Estimation</h2>
+            <p className="text-xs text-text-muted mt-0.5">
+              AI-generated estimates based on requirements complexity and historical project data.
+            </p>
+          </div>
+          <button
+            onClick={() => {
+              estimationFiredRef.current = true;
+              runEstimation(undefined, true);
+            }}
+            disabled={generating}
+            className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border border-border bg-card hover:bg-surface-subtle transition-colors disabled:opacity-50"
+          >
+            {generating ? (
+              <>
+                <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 16 16" stroke="currentColor" strokeWidth={2}>
+                  <path d="M8 2a6 6 0 1 0 6 6" strokeLinecap="round" />
+                </svg>
+                Estimating…
+              </>
+            ) : (
+              <>
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 16 16" stroke="currentColor" strokeWidth={2}>
+                  <path d="M13 6A6 6 0 1 0 8 14" strokeLinecap="round" />
+                  <path d="M13 2v4h-4" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                Re-run Estimation
+              </>
+            )}
+          </button>
         </div>
+
+        {/* Progress bar */}
+        {estimateStatus !== "idle" && (
+          <div className="flex flex-col gap-2 bg-card border border-border rounded-xl px-4 py-3">
+            <div className="flex items-center justify-between">
+              <span
+                className={cn(
+                  "text-xs font-medium",
+                  estimateStatus === "fetching" && "text-amber-600",
+                  estimateStatus === "computing" && "text-blue-600 animate-pulse",
+                  estimateStatus === "done" && "text-green-600",
+                )}
+              >
+                {estimateStatus === "fetching" && "Fetching historical projects…"}
+                {estimateStatus === "computing" &&
+                  `Estimating epics… (${completedCount} found)`}
+                {estimateStatus === "done" &&
+                  `${summaryData?.total_points ?? 0} story points across ${streamedEpics.length} epic${streamedEpics.length !== 1 ? "s" : ""} ✓`}
+              </span>
+              {estimateStatus === "done" && (
+                <svg className="w-4 h-4 text-green-500" fill="none" viewBox="0 0 16 16" stroke="currentColor" strokeWidth={2}>
+                  <path d="M3 8l4 4 6-7" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              )}
+            </div>
+            <div className="w-full h-1.5 bg-border rounded-full overflow-hidden">
+              <div
+                className={cn(
+                  "h-full rounded-full transition-all duration-500",
+                  estimateStatus === "done" ? "bg-green-500" : "bg-primary",
+                )}
+                style={{ width: progressWidth }}
+              />
+            </div>
+          </div>
+        )}
 
         {/* Summary stats */}
         <div className="grid grid-cols-3 gap-3">
-          <MetricsStatCard label="Story Points" value={loading ? "…" : effort ? String(effort.total_points) : "—"} />
-          <MetricsStatCard label="Weeks"         value={loading ? "…" : effort ? `${effort.total_weeks}w` : "—"} />
-          <MetricsStatCard label="Confidence"    value={loading ? "…" : confidenceLabel} />
+          <MetricsStatCard
+            label="Story Points"
+            value={estimateStatus === "idle" ? "—" : summaryData ? String(summaryData.total_points) : "…"}
+          />
+          <MetricsStatCard
+            label="Weeks"
+            value={estimateStatus === "idle" ? "—" : summaryData ? `${summaryData.total_weeks}w` : "…"}
+          />
+          <MetricsStatCard
+            label="Confidence"
+            value={estimateStatus === "idle" ? "—" : summaryData ? confidenceLabel : "…"}
+          />
         </div>
 
         {/* Estimate table */}
@@ -81,51 +210,34 @@ export default function EstimationPage({ params }: { params: Promise<{ id: strin
           <div className="overflow-x-auto">
             <div className="min-w-[420px]">
               <div className="px-4 py-3 border-b border-border bg-surface-subtle/50 grid grid-cols-12 gap-2 text-[10px] font-semibold uppercase tracking-wide text-text-muted">
-                <span className="col-span-7">Epic</span>
-                <span className="col-span-2 text-center">Points</span>
-                <span className="col-span-3 text-center">Confidence</span>
+                <span className="col-span-9">Epic</span>
+                <span className="col-span-3 text-center">Points</span>
               </div>
 
               <div className="divide-y divide-border">
-                {loading ? (
-                  <div className="px-4 py-6 text-sm text-text-muted text-center">Estimating…</div>
-                ) : epics.length === 0 ? (
-                  <div className="px-4 py-6 text-sm text-text-muted text-center">No breakdown available yet.</div>
+                {estimateStatus === "idle" || (estimateStatus === "fetching" && streamedEpics.length === 0) ? (
+                  <div className="px-4 py-6 text-sm text-text-muted text-center">
+                    {estimateStatus === "idle" ? "No breakdown available yet." : "Fetching historical projects…"}
+                  </div>
+                ) : streamedEpics.length === 0 && estimateStatus === "computing" ? (
+                  <div className="px-4 py-6 text-sm text-text-muted text-center">Estimating epics…</div>
                 ) : (
-                  epics.map((epic, i) => {
-                    const conf = epic.confidence;
-                    const confLabel = conf != null ? `${(conf * 100).toFixed(0)}%` : "—";
-                    const confColor =
-                      conf == null ? "text-text-muted bg-muted"
-                      : conf >= 0.75 ? "text-success bg-success-subtle"
-                      : conf >= 0.5 ? "text-warning bg-warning-subtle"
-                      : "text-destructive bg-destructive-subtle";
-                    return (
-                      <div key={i} className="grid grid-cols-12 gap-2 px-4 py-3 items-center">
-                        <span className="col-span-7 text-sm font-medium text-foreground leading-snug">{epic.title}</span>
-                        <span className="col-span-2 text-center text-xs tabular-nums font-mono text-foreground font-semibold">
-                          {epic.estimated_points}
-                        </span>
-                        <span className="col-span-3 flex justify-center">
-                          <span className={cn("text-[10px] font-medium px-2 py-0.5 rounded-full", confColor)}>
-                            {confLabel}
-                          </span>
-                        </span>
-                      </div>
-                    );
-                  })
+                  streamedEpics.map((epic, i) => (
+                    <div key={i} className="grid grid-cols-12 gap-2 px-4 py-3 items-center">
+                      <span className="col-span-9 text-sm font-medium text-foreground leading-snug">{epic.title}</span>
+                      <span className="col-span-3 text-center text-xs tabular-nums font-mono text-foreground font-semibold">
+                        {epic.estimated_points}
+                      </span>
+                    </div>
+                  ))
                 )}
               </div>
 
-              {/* Totals row */}
-              {!loading && effort && (
+              {estimateStatus === "done" && summaryData && (
                 <div className="grid grid-cols-12 gap-2 px-4 py-3 border-t border-border bg-surface-subtle/50 items-center">
-                  <span className="col-span-7 text-xs font-semibold text-foreground">Total</span>
-                  <span className="col-span-2 text-center text-xs font-semibold tabular-nums font-mono text-foreground">
-                    {effort.total_points}
-                  </span>
-                  <span className="col-span-3 text-[11px] text-text-muted text-center">
-                    ≈ {effort.total_weeks}w
+                  <span className="col-span-9 text-xs font-semibold text-foreground">Total</span>
+                  <span className="col-span-3 text-center text-xs font-semibold tabular-nums font-mono text-foreground">
+                    {summaryData.total_points}
                   </span>
                 </div>
               )}
@@ -153,7 +265,6 @@ export default function EstimationPage({ params }: { params: Promise<{ id: strin
         )}
 
         <div className="flex items-center justify-end pt-2 border-t border-border">
-          {/* Proceed */}
           <button
             onClick={handleProceed}
             disabled={proceeding}

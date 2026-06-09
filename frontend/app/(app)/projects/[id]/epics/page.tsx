@@ -1,17 +1,18 @@
 "use client";
 
 import { useState, useEffect, useRef, use } from "react";
+import { toast } from "sonner";
 import { PhaseProgressStepper } from "@/components/phase-progress-stepper";
 import { EpicTaskListItem } from "@/components/epic-task-list-item";
 import { SyncStatusBadge } from "@/components/sync-status-badge";
-import { ErrorBanner, ReviewPageSkeleton } from "@/components/page-states";
+import { ErrorBanner } from "@/components/page-states";
 import { getPhasesForRoute } from "@/lib/project-phases";
 import type { EpicItem } from "@/components/epic-task-list-item";
 import type { SyncStatus } from "@/components/sync-status-badge";
 import { cn } from "@/lib/utils";
 import {
   getEpics,
-  triggerEpics,
+  streamEpics,
   getSyncConfig,
   updateSyncConfig,
   getEstimateExportUrl,
@@ -59,6 +60,7 @@ function mapApiEpics(apiEpics: ApiEpic[]): EpicItem[] {
   }));
 }
 
+type EpicsStatus = "idle" | "generating" | "done";
 type SyncState = "idle" | "syncing" | "done" | "error";
 
 function SyncSummary({ epics }: { epics: EpicItem[] }) {
@@ -188,65 +190,101 @@ function ConfigureDialog({ projectId, current, onSaved, onClose }: ConfigureDial
 
 export default function EpicsPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
-  const [epics, setEpics]               = useState<EpicItem[]>([]);
-  const [syncState, setSyncState]       = useState<SyncState>("idle");
-  const [syncError, setSyncError]       = useState<string | null>(null);
-  const [milestonesUrl, setMilestonesUrl] = useState<string | null>(null);
-  const [loading, setLoading]           = useState(true);
-  const [syncCfg, setSyncCfg]           = useState<SyncConfigResponse | null>(null);
-  const [showConfig, setShowConfig]     = useState(false);
+  const [epics, setEpics]                   = useState<EpicItem[]>([]);
+  const [epicsStatus, setEpicsStatus]       = useState<EpicsStatus>("idle");
+  const [completedCount, setCompletedCount] = useState(0);
+  const [generating, setGenerating]         = useState(false);
+  const [syncState, setSyncState]           = useState<SyncState>("idle");
+  const [syncError, setSyncError]           = useState<string | null>(null);
+  const [milestonesUrl, setMilestonesUrl]   = useState<string | null>(null);
+  const [syncCfg, setSyncCfg]               = useState<SyncConfigResponse | null>(null);
+  const [showConfig, setShowConfig]         = useState(false);
   const epicsFiredRef = useRef(false);
 
-  useEffect(() => {
-    if (epicsFiredRef.current) return;
-    epicsFiredRef.current = true;
-    Promise.all([
-      getEpics(id),
-      getSyncConfig(id),
-    ]).then(([epicsData, cfgData]) => {
-      setSyncCfg(cfgData);
-      if (epicsData.epics.length > 0) {
-        setEpics(mapApiEpics(epicsData.epics));
-      } else {
-        return triggerEpics(id).then((genData) => {
-          setEpics(mapApiEpics(genData.epics.map((e, i) => ({
-            id: i + 1,
-            title: e.title,
-            description: e.description,
-            sync_status: "pending",
-            github_milestone_number: null,
-            github_milestone_url: null,
-            tracker_ref: null,
-            tracker_url: null,
-            tracker_type: null,
-            tasks: e.tasks.map((t, j) => ({
-              id: (i + 1) * 100 + j,
-              title: t.title,
-              description: t.description,
-              story_points: t.story_points,
-              labels: t.labels,
-              sync_status: "pending",
-              github_issue_number: null,
-              github_issue_url: null,
-              tracker_ref: null,
-              tracker_url: null,
-              tracker_type: null,
-            })),
-          }))));
-        });
+  async function runEpicsStream(isCancelled?: () => boolean, force = false) {
+    setGenerating(true);
+    setEpicsStatus("generating");
+    if (force) {
+      setEpics([]);
+      setCompletedCount(0);
+    }
+    try {
+      await streamEpics(
+        id,
+        {
+          onStatus: () => {
+            if (isCancelled?.()) return;
+            setEpicsStatus("generating");
+          },
+          onEpic: (epic) => {
+            if (isCancelled?.()) return;
+            const tempId = `stream_${Date.now()}_${Math.random()}`;
+            setEpics((prev) => [
+              ...prev,
+              {
+                id: tempId,
+                title: epic.title,
+                points: epic.tasks.reduce((s, t) => s + (t.story_points ?? 0), 0),
+                syncStatus: "pending",
+                selected: true,
+                tasks: epic.tasks.map((t, i) => ({
+                  id: `${tempId}_t${i}`,
+                  title: t.title,
+                  points: t.story_points ?? 3,
+                  syncStatus: "pending" as SyncStatus,
+                })),
+              },
+            ]);
+            setCompletedCount((n) => n + 1);
+          },
+          onDone: () => {
+            if (isCancelled?.()) return;
+            // Refresh with real DB IDs so sync works correctly
+            getEpics(id)
+              .then((data) => {
+                if (!isCancelled?.()) setEpics(mapApiEpics(data.epics));
+              })
+              .catch(() => {});
+            setEpicsStatus("done");
+          },
+        },
+        force,
+      );
+    } catch {
+      if (!isCancelled?.()) {
+        toast.error("Epic generation failed — try again");
+        setEpicsStatus("idle");
       }
-    })
-    .catch(() => { /* stay with empty list */ })
-    .finally(() => setLoading(false));
+    } finally {
+      if (!isCancelled?.()) setGenerating(false);
+    }
+  }
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      if (epicsFiredRef.current) return;
+      epicsFiredRef.current = true;
+      await runEpicsStream(() => cancelled);
+    }
+    load();
+    getSyncConfig(id)
+      .then(setSyncCfg)
+      .catch(() => {});
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
-  if (loading) return <ReviewPageSkeleton />;
+  // Progress bar — mirrors estimation page pattern
+  const progressWidth =
+    epicsStatus === "idle"   ? "0%"
+    : epicsStatus === "done" ? "100%"
+    : `${Math.min(5 + completedCount * 12, 88)}%`;
 
   const selectedCount  = epics.filter((e) => e.selected).length;
   const selectedPoints = epics.filter((e) => e.selected).reduce((s, e) => s + e.points, 0);
   const provider       = syncCfg?.provider ?? "github";
-
-  const allSelected = epics.length > 0 && epics.every((e) => e.selected);
+  const allSelected    = epics.length > 0 && epics.every((e) => e.selected);
 
   function toggleAll() {
     const next = !allSelected;
@@ -281,7 +319,6 @@ export default function EpicsPage({ params }: { params: Promise<{ id: string }> 
   async function handleSync() {
     setSyncState("syncing");
     setSyncError(null);
-
     try {
       const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
       const selectedIds = epics.filter((e) => e.selected).map((e) => Number(e.id));
@@ -291,7 +328,6 @@ export default function EpicsPage({ params }: { params: Promise<{ id: string }> 
         body: JSON.stringify({ epic_ids: selectedIds }),
       });
       if (!res.ok) throw new Error(`Sync failed: ${res.status}`);
-
       const syncData = await res.json();
       if (syncData.milestones_url) setMilestonesUrl(syncData.milestones_url);
       const data = await getEpics(id);
@@ -335,6 +371,34 @@ export default function EpicsPage({ params }: { params: Promise<{ id: string }> 
             </div>
             <div className="flex items-center gap-3 flex-wrap">
               <SyncSummary epics={epics} />
+
+              {/* Re-generate button */}
+              <button
+                onClick={() => {
+                  epicsFiredRef.current = true;
+                  runEpicsStream(undefined, true);
+                }}
+                disabled={generating}
+                className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border border-border bg-card hover:bg-surface-subtle transition-colors disabled:opacity-50"
+              >
+                {generating ? (
+                  <>
+                    <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 16 16" stroke="currentColor" strokeWidth={2}>
+                      <path d="M8 2a6 6 0 1 0 6 6" strokeLinecap="round" />
+                    </svg>
+                    Generating…
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 16 16" stroke="currentColor" strokeWidth={2}>
+                      <path d="M13 6A6 6 0 1 0 8 14" strokeLinecap="round" />
+                      <path d="M13 2v4h-4" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                    Re-generate
+                  </>
+                )}
+              </button>
+
               {milestonesUrl && (
                 <a
                   href={milestonesUrl}
@@ -376,12 +440,12 @@ export default function EpicsPage({ params }: { params: Promise<{ id: string }> 
               </button>
               <button
                 onClick={handleSync}
-                disabled={syncState === "syncing" || syncState === "done" || selectedCount === 0}
+                disabled={syncState === "syncing" || syncState === "done" || selectedCount === 0 || epicsStatus !== "done"}
                 className={cn(
                   "inline-flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors",
                   syncState === "done"
                     ? "bg-success-subtle text-success border border-success/20 cursor-default"
-                    : syncState === "syncing" || selectedCount === 0
+                    : syncState === "syncing" || selectedCount === 0 || epicsStatus !== "done"
                     ? "bg-muted text-text-muted cursor-not-allowed"
                     : "bg-primary text-primary-foreground hover:bg-accent-hover"
                 )}
@@ -397,7 +461,7 @@ export default function EpicsPage({ params }: { params: Promise<{ id: string }> 
                   </svg>
                 )}
                 {syncState === "syncing"
-                  ? `Syncing…`
+                  ? "Syncing…"
                   : syncState === "done"
                   ? "Synced"
                   : `Sync to ${providerLabel(provider)}`}
@@ -405,32 +469,64 @@ export default function EpicsPage({ params }: { params: Promise<{ id: string }> 
             </div>
           </div>
 
-          {/* Selection summary + select all */}
-          <div className="flex items-center justify-between text-xs text-text-secondary px-1">
-            <div className="flex items-center gap-4">
-              <span><strong className="text-foreground tabular-nums">{selectedCount}</strong> of {epics.length} epics selected</span>
-              <span><strong className="text-foreground tabular-nums">{selectedPoints}</strong> story points</span>
+          {/* Progress bar — visible during and after generation */}
+          {epicsStatus !== "idle" && (
+            <div className="flex flex-col gap-2 bg-card border border-border rounded-xl px-4 py-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium text-text-secondary">
+                  {epicsStatus === "generating" && completedCount === 0
+                    ? "Analyzing proposal and tech stack…"
+                    : epicsStatus === "generating"
+                    ? `Generating epic ${completedCount}…`
+                    : `${completedCount} epic${completedCount !== 1 ? "s" : ""} generated`}
+                </span>
+                <span className="text-xs tabular-nums text-text-muted">
+                  {epicsStatus === "done" ? "✓" : `${completedCount} so far`}
+                </span>
+              </div>
+              <div className="h-1.5 w-full rounded-full bg-surface-subtle overflow-hidden">
+                <div
+                  className={cn(
+                    "h-full rounded-full transition-all duration-500",
+                    epicsStatus === "done"
+                      ? "bg-success"
+                      : "bg-primary animate-pulse"
+                  )}
+                  style={{ width: progressWidth }}
+                />
+              </div>
             </div>
-            <button
-              onClick={toggleAll}
-              className="text-xs text-primary hover:text-accent-hover transition-colors font-medium"
-            >
-              {allSelected ? "Deselect all" : "Select all"}
-            </button>
-          </div>
+          )}
 
-          {/* Epic list */}
-          <div className="flex flex-col gap-2">
-            {epics.map((epic) => (
-              <EpicTaskListItem key={epic.id} epic={epic} onToggleSelect={toggleEpic} />
-            ))}
-          </div>
+          {/* Selection summary + select all */}
+          {epics.length > 0 && (
+            <div className="flex items-center justify-between text-xs text-text-secondary px-1">
+              <div className="flex items-center gap-4">
+                <span><strong className="text-foreground tabular-nums">{selectedCount}</strong> of {epics.length} epics selected</span>
+                <span><strong className="text-foreground tabular-nums">{selectedPoints}</strong> story points</span>
+              </div>
+              <button
+                onClick={toggleAll}
+                className="text-xs text-primary hover:text-accent-hover transition-colors font-medium"
+              >
+                {allSelected ? "Deselect all" : "Select all"}
+              </button>
+            </div>
+          )}
+
+          {/* Epic list — renders progressively as epics stream in */}
+          {epics.length > 0 && (
+            <div className="flex flex-col gap-2">
+              {epics.map((epic) => (
+                <EpicTaskListItem key={epic.id} epic={epic} onToggleSelect={toggleEpic} />
+              ))}
+            </div>
+          )}
 
           {/* Error */}
           {syncError && (
             <ErrorBanner message={syncError} onRetry={() => { setSyncError(null); setSyncState("idle"); }} />
           )}
-
         </div>
       </div>
     </>
