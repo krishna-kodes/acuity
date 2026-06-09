@@ -12,7 +12,7 @@ class ApprovedTechnology(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
     category: Mapped[str] = mapped_column(String(100), nullable=False)
-    tags: Mapped[str | None] = mapped_column(Text)  # JSON-serialized list
+    tags: Mapped[str | None] = mapped_column(Text)  # comma-separated use-case tags
 
 
 class HistoricalProject(Base):
