@@ -1,4 +1,5 @@
 from app.models.base import Base
+from app.models.branding import BrandingSettings
 from app.models.clarification import Clarification
 from app.models.employee import Employee, EmployeeSkill, Skill
 from app.models.enums import (
@@ -18,6 +19,7 @@ from app.models.sync import Epic, Task
 
 __all__ = [
     "Base",
+    "BrandingSettings",
     "DocumentStatus", "ProjectPhase", "ProjectStatus",
     "SyncStatus", "TBDAction", "TBDLevel", "TBDStatus",
     "Project", "Document", "Proposal", "ProposalState",
