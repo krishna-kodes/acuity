@@ -109,6 +109,8 @@ async def retrieve(
 
     Returns (reranked_chunks, all_reranker_scores, n_candidates_before_rerank).
     """
+    if not query.strip():
+        return [], [], 0
     top_k = top_k or settings.top_k_retrieval
     top_n = top_n or settings.top_n_rerank
     queries = await rewrite_queries(query, n=settings.query_rewrite_count)

@@ -1303,6 +1303,11 @@ async def estimate_effort(
         from app.services.workflow import run_phase
         state = await run_phase(str(project.id))
         effort = state.get("effort_estimates") or {}
+        for _ in range(6):
+            if effort:
+                break
+            state = await run_phase(str(project.id))
+            effort = state.get("effort_estimates") or {}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Effort estimation failed: {exc}") from exc
 

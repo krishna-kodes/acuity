@@ -279,6 +279,18 @@ async def _chat_turn_node(state: ProjectState) -> dict[str, Any]:
         (m["content"] for m in reversed(messages) if m["role"] == "user"), ""
     )
 
+    if not last_user.strip():
+        return {
+            "chat_messages": messages,
+            "tbd_items": list(state.get("tbd_items") or []),
+            "groundedness_score": None,
+            "gate_status": None,
+            "gate_message": None,
+            "groundedness_reasoning": None,
+            "groundedness_unsupported_claims": None,
+            "chat_proceed": True,
+        }
+
     chunks, reranker_scores, n_candidates = await retrieve(project_id, last_user)
 
     # Layer 2: retrieval gate (no LLM — pure score/metadata evaluation)
