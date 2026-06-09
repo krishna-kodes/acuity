@@ -81,20 +81,12 @@ export default function EstimationPage({ params }: { params: Promise<{ id: strin
   }
 
   useEffect(() => {
-    let cancelled = false;
-
-    async function load() {
-      if (estimationFiredRef.current) return;
-      estimationFiredRef.current = true;
-      await runEstimation(() => cancelled);
-    }
-
-    load();
+    if (estimationFiredRef.current) return;
+    estimationFiredRef.current = true;
+    runEstimation();
     getModules(id)
       .then((data) => { setModules(data.modules); })
       .catch(() => {});
-
-    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
