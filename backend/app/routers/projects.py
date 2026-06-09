@@ -668,7 +668,8 @@ def get_tbds(
 
     tbds = (
         db.query(Clarification)
-        .filter(Clarification.project_id == pid, Clarification.status == TBDStatus.open)
+        .filter(Clarification.project_id == pid)
+        .order_by(Clarification.status)
         .all()
     )
     return [
@@ -676,7 +677,8 @@ def get_tbds(
             id=str(t.id),
             question=t.title,
             level=_tbd_level_int.get(t.level, 1),
-            resolved=False,
+            resolved=t.status != TBDStatus.open,
+            status=t.status.value if hasattr(t.status, "value") else str(t.status),
         )
         for t in tbds
     ]
@@ -1007,6 +1009,114 @@ async def extract_modules(
     project.modules_json = json.dumps(modules)
     db.commit()
     return ModulesResponse(modules=[ModuleOut(**m) for m in modules])
+
+
+@router.post("/projects/{project_id}/modules/stream")
+async def extract_modules_stream(
+    project_id: str,
+    db: Session = Depends(get_db),
+):
+    """SSE stream: emits status → module events → done for module extraction."""
+    import uuid as _uuid
+    from app.services.llm_factory import get_llm
+
+    project = _get_project_or_404(project_id, db)
+
+    proposal = (
+        db.query(Proposal)
+        .filter(Proposal.project_id == project.id)
+        .order_by(Proposal.created_at.desc())
+        .first()
+    )
+
+    sections_text = ""
+    if proposal and proposal.content_json:
+        try:
+            raw = json.loads(proposal.content_json)
+            sections = raw.get("sections", [])
+            sections_text = "\n\n".join(
+                f"## {s['heading']}\n{s['body']}" for s in sections
+            )
+        except Exception:
+            pass
+
+    prompt = (
+        "You are a project analyst. Given this proposal, extract ALL discrete work modules.\n"
+        "For each module output: title (concise noun phrase), label (one of: frontend, backend, "
+        "devops, QA, PM, design, data, infra), description (one sentence).\n\n"
+        f"Proposal sections:\n{sections_text}\n\n"
+        'Respond ONLY with valid JSON:\n'
+        '{"modules": [{"id": "<uuid4>", "title": "...", "label": "...", "description": "..."}, ...]}'
+    )
+
+    llm = get_llm()
+
+    async def _generate():
+        yield f'data: {json.dumps({"type": "status", "status": "started"})}\n\n'
+
+        buffer = ""
+        full_buffer = ""
+        seen_ids: set[str] = set()
+        modules: list[dict] = []
+
+        try:
+            if sections_text:
+                async for chunk in llm.astream(prompt):
+                    token = chunk.content if hasattr(chunk, "content") else str(chunk)
+                    buffer += token
+                    full_buffer += token
+                    matches = list(re.finditer(r'\{[^{}]+\}', buffer))
+                    for match in matches:
+                        try:
+                            m = json.loads(match.group())
+                            if {"title", "label"} <= m.keys() and m.get("title"):
+                                mid = m.get("id") or str(_uuid.uuid4())
+                                if mid not in seen_ids:
+                                    seen_ids.add(mid)
+                                    module = {
+                                        "id": mid,
+                                        "title": str(m["title"]),
+                                        "label": str(m.get("label", "backend")),
+                                        "description": str(m.get("description", "")),
+                                    }
+                                    modules.append(module)
+                                    yield f'data: {json.dumps({"type": "module", "module": module})}\n\n'
+                        except (json.JSONDecodeError, KeyError):
+                            pass
+                    if matches:
+                        buffer = buffer[matches[-1].end():]
+
+            # Fallback: parse full buffer to catch modules regex missed (e.g. full JSON in one chunk)
+            if full_buffer.strip():
+                try:
+                    cleaned = re.sub(r"```(?:json)?\s*", "", full_buffer).strip().rstrip("`").strip()
+                    parsed = json.loads(cleaned)
+                    for m in parsed.get("modules", []):
+                        if m.get("title") and m.get("label"):
+                            mid = m.get("id") or str(_uuid.uuid4())
+                            if mid not in seen_ids:
+                                seen_ids.add(mid)
+                                module = {
+                                    "id": mid,
+                                    "title": str(m["title"]),
+                                    "label": str(m.get("label", "backend")),
+                                    "description": str(m.get("description", "")),
+                                }
+                                modules.append(module)
+                                yield f'data: {json.dumps({"type": "module", "module": module})}\n\n'
+                except Exception:
+                    pass
+
+            yield f'data: {json.dumps({"type": "done", "modules": modules, "count": len(modules)})}\n\n'
+        finally:
+            project.modules_json = json.dumps(modules)
+            db.commit()
+
+    return StreamingResponse(
+        _generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.get("/projects/{project_id}/modules", response_model=ModulesResponse)
@@ -1645,6 +1755,17 @@ def update_sync_config(
         provider=resolved_provider,
         config=SyncConfigRequest.model_validate(project.sync_config or {}),
     )
+
+
+@router.get(
+    "/projects/{project_id}/chat-history",
+    summary="Return persisted chat messages for this project",
+)
+async def get_chat_history(project_id: str) -> list[dict]:
+    wf = await get_workflow()
+    config = {"configurable": {"thread_id": project_id}}
+    existing = await wf.aget_state(config)
+    return list(existing.values.get("chat_messages") or [])
 
 
 @router.post(

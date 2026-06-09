@@ -7,7 +7,9 @@ Covers:
 - 404 for missing project_id on key GET endpoints
 """
 
+import json
 import pytest
+from unittest.mock import MagicMock, patch
 from app.models.enums import ProjectPhase, ProjectStatus
 from app.models.project import Project, Proposal
 
@@ -214,3 +216,92 @@ def test_export_estimate_phase_guard(client, project_id, db_session):
     resp = client.get(f"/api/v1/projects/{project_id}/export/estimate?format=csv")
     assert resp.status_code == 409
     assert "Phase 5" in resp.json()["detail"]
+
+
+# ---------------------------------------------------------------------------
+# POST /projects/{id}/modules/stream — SSE streaming
+# ---------------------------------------------------------------------------
+
+def test_extract_modules_stream_emits_sse_events(client, project_id, db_session):
+    """Streaming endpoint emits started, one+ module events, and done."""
+    from app.models.project import Proposal as _Proposal
+
+    proposal = db_session.query(_Proposal).filter(_Proposal.project_id == int(project_id)).first()
+    if not proposal:
+        proposal = _Proposal(
+            project_id=int(project_id),
+            document_id=0,
+            content_path="documents/stub.docx",
+        )
+        db_session.add(proposal)
+    proposal.content_json = json.dumps({
+        "sections": [{"heading": "Overview", "body": "Build an e-commerce platform."}]
+    })
+    db_session.commit()
+
+    chunks = [
+        MagicMock(content='{"modules": ['),
+        MagicMock(content='{"id": "m-1", "title": "Auth Service", "label": "backend", "description": "Handles login."}'),
+        MagicMock(content=', {"id": "m-2", "title": "Product UI", "label": "frontend", "description": "Product pages."}'),
+        MagicMock(content="]}"),
+    ]
+
+    async def _astream(prompt):
+        for c in chunks:
+            yield c
+
+    mock_llm = MagicMock()
+    mock_llm.astream = _astream
+
+    with patch("app.services.llm_factory.get_llm", return_value=mock_llm):
+        resp = client.post(f"/api/v1/projects/{project_id}/modules/stream")
+
+    assert resp.status_code == 200
+    assert "text/event-stream" in resp.headers["content-type"]
+
+    events = [
+        json.loads(line[6:])
+        for line in resp.text.splitlines()
+        if line.startswith("data: ")
+    ]
+
+    assert events[0] == {"type": "status", "status": "started"}
+
+    module_events = [e for e in events if e["type"] == "module"]
+    assert len(module_events) == 2
+    assert module_events[0]["module"]["title"] == "Auth Service"
+    assert module_events[0]["module"]["label"] == "backend"
+    assert module_events[1]["module"]["title"] == "Product UI"
+
+    done_events = [e for e in events if e["type"] == "done"]
+    assert len(done_events) == 1
+    assert done_events[0]["count"] == 2
+    assert len(done_events[0]["modules"]) == 2
+
+
+def test_extract_modules_stream_empty_proposal(client, project_id, db_session):
+    """Streaming endpoint emits started+done with no modules when proposal has no content."""
+    from app.models.project import Proposal as _Proposal
+
+    proposal = db_session.query(_Proposal).filter(_Proposal.project_id == int(project_id)).first()
+    if not proposal:
+        proposal = _Proposal(
+            project_id=int(project_id),
+            document_id=0,
+            content_path="documents/stub.docx",
+        )
+        db_session.add(proposal)
+    proposal.content_json = None
+    db_session.commit()
+
+    resp = client.post(f"/api/v1/projects/{project_id}/modules/stream")
+
+    assert resp.status_code == 200
+    events = [
+        json.loads(line[6:])
+        for line in resp.text.splitlines()
+        if line.startswith("data: ")
+    ]
+    assert events[0] == {"type": "status", "status": "started"}
+    assert events[-1]["type"] == "done"
+    assert events[-1]["count"] == 0

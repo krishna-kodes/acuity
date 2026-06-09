@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { PhaseProgressStepper } from "@/components/phase-progress-stepper";
 import { getPhasesForRoute, getNextPhaseRoute } from "@/lib/project-phases";
 import {
-  extractModules,
+  extractModulesStream,
   getModules,
   saveModules,
   approveModules,
@@ -57,25 +57,43 @@ export default function ModulesPage({ params }: { params: Promise<{ id: string }
   // Prevents React StrictMode double-fire from triggering two LLM extraction calls
   const extractionFiredRef = useRef(false);
 
+  type ExtractionStatus = "idle" | "started" | "generating" | "done"
+  const [extractionStatus, setExtractionStatus] = useState<ExtractionStatus>("idle")
+  const [extractionTotal, setExtractionTotal] = useState(0)
+  const newModuleIdsRef = useRef<Set<string>>(new Set())
+
   async function runExtraction(isCancelled?: () => boolean) {
-    setExtracting(true);
-    const tid = toast.loading("Extracting modules from proposal…");
+    setExtracting(true)
+    setExtractionStatus("started")
+    setModules([])
+    setExtractionTotal(0)
+    newModuleIdsRef.current.clear()
     try {
-      const data = await extractModules(id);
-      if (isCancelled?.()) { toast.dismiss(tid); return; }
-      setModules(data.modules);
-      setIsDirty(false);
-      toast.dismiss(tid);
-      toast.success(
-        data.modules.length > 0
-          ? `${data.modules.length} module${data.modules.length !== 1 ? "s" : ""} extracted`
-          : "No modules extracted — add them manually below"
-      );
+      await extractModulesStream(
+        id,
+        (status) => {
+          if (!isCancelled?.()) setExtractionStatus(status as ExtractionStatus)
+        },
+        (module) => {
+          newModuleIdsRef.current.add(module.id)
+          if (!isCancelled?.()) {
+            setModules((prev) => [...prev, module])
+            setExtractionStatus("generating")
+          }
+        },
+        (done) => {
+          if (!isCancelled?.()) {
+            setModules(done.modules)
+            setExtractionTotal(done.count)
+            setExtractionStatus("done")
+            setIsDirty(false)
+          }
+        },
+      )
     } catch {
-      toast.dismiss(tid);
-      if (!isCancelled?.()) toast.error("Extraction failed — add modules manually");
+      if (!isCancelled?.()) toast.error("Extraction failed — add modules manually")
     } finally {
-      setExtracting(false);
+      setExtracting(false)
     }
   }
 
@@ -213,22 +231,68 @@ export default function ModulesPage({ params }: { params: Promise<{ id: string }
           </button>
         </div>
 
-        {/* Loading state */}
-        {extracting && modules.length === 0 ? (
-          <div className="bg-card border border-border rounded-xl py-12 flex flex-col items-center gap-3">
-            <svg className="w-6 h-6 animate-spin text-primary" fill="none" viewBox="0 0 16 16" stroke="currentColor" strokeWidth={2}>
-              <path d="M8 2a6 6 0 1 0 6 6" strokeLinecap="round" />
-            </svg>
-            <p className="text-xs text-text-muted">Extracting modules from proposal…</p>
+        {/* Progress bar — visible during and after extraction */}
+        {extractionStatus !== "idle" && (
+          <div className="flex flex-col gap-2 bg-card border border-border rounded-xl px-4 py-3">
+            <div className="flex items-center justify-between">
+              <span
+                className={cn(
+                  "text-xs font-medium",
+                  extractionStatus === "started" && "text-amber-600",
+                  extractionStatus === "generating" && "text-blue-600 animate-pulse",
+                  extractionStatus === "done" && "text-green-600",
+                )}
+              >
+                {extractionStatus === "started" && "Analyzing proposal…"}
+                {extractionStatus === "generating" &&
+                  `Generating modules… (${modules.length} found)`}
+                {extractionStatus === "done" &&
+                  `${modules.length} module${modules.length !== 1 ? "s" : ""} extracted ✓`}
+              </span>
+              {extractionStatus === "done" && (
+                <svg
+                  className="w-4 h-4 text-green-500"
+                  fill="none"
+                  viewBox="0 0 16 16"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                >
+                  <path d="M3 8l4 4 6-7" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              )}
+            </div>
+            <div className="w-full h-1.5 bg-border rounded-full overflow-hidden">
+              <div
+                className={cn(
+                  "h-full rounded-full transition-all duration-500",
+                  extractionStatus === "done" ? "bg-green-500" : "bg-primary",
+                )}
+                style={{
+                  width:
+                    extractionStatus === "started"
+                      ? "5%"
+                      : extractionStatus === "done"
+                        ? "100%"
+                        : `${Math.min(
+                            95,
+                            Math.round(
+                              (modules.length / Math.max(modules.length, extractionTotal || 10)) * 100,
+                            ),
+                          )}%`,
+                }}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Module groups */}
+        {[...labelOrder, ...otherLabels].length === 0 && extractionStatus === "idle" ? (
+          <div className="bg-card border border-border rounded-xl py-10 flex flex-col items-center gap-2 text-center">
+            <p className="text-sm text-text-muted">No modules yet — add one below or re-extract from the proposal.</p>
           </div>
         ) : (
           <>
-            {/* Module groups */}
-            {[...labelOrder, ...otherLabels].length === 0 ? (
-              <div className="bg-card border border-border rounded-xl py-10 flex flex-col items-center gap-2 text-center">
-                <p className="text-sm text-text-muted">No modules yet — add one below or re-extract from the proposal.</p>
-              </div>
-            ) : (
+            {[...labelOrder, ...otherLabels].length > 0 && (
               <div className="flex flex-col gap-3">
                 {[...labelOrder, ...otherLabels].map((label) => (
                   <div key={label} className="bg-card border border-border rounded-xl overflow-hidden">
@@ -248,7 +312,13 @@ export default function ModulesPage({ params }: { params: Promise<{ id: string }
                     {/* Module rows */}
                     <div className="divide-y divide-border">
                       {grouped[label].map((m) => (
-                        <div key={m.id} className="flex items-center gap-3 px-4 py-2.5 group">
+                        <div
+                          key={m.id}
+                          className={cn(
+                            "flex items-center gap-3 px-4 py-2.5 group",
+                            newModuleIdsRef.current.has(m.id) && "module-row-appear",
+                          )}
+                        >
                           {editingId === m.id ? (
                             <input
                               autoFocus

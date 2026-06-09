@@ -44,13 +44,14 @@ class ProposalContext:
     chat_history: str
 
 
-def _get_claude_sonnet():
-    from langchain_anthropic import ChatAnthropic
+def _get_proposal_llm():
+    from langchain_openai import ChatOpenAI
+    from app.config import settings
 
-    return ChatAnthropic(
-        model="claude-sonnet-4-6",
-        api_key=os.environ["ANTHROPIC_API_KEY"],
-        temperature=0.2,
+    return ChatOpenAI(
+        model=settings.main_llm_model,
+        api_key=settings.openai_api_key,
+        temperature=settings.temperature,
     )
 
 
@@ -236,7 +237,7 @@ async def generate_structured_proposal(
     if additional_context:
         ctx.chat_history += f"\n\nAdditional PM context: {additional_context}"
 
-    llm = _get_claude_sonnet()
+    llm = _get_proposal_llm()
 
     # Step 1: overview first
     overview = await _gen_section(ProposalSectionId.overview, ctx, llm)
@@ -299,6 +300,56 @@ async def generate_structured_proposal(
     return [sections_map[sid] for sid in ProposalSectionId]
 
 
+async def generate_structured_proposal_stream(
+    project: "Project",
+    db: "Session",
+    additional_context: str = "",
+):
+    """Async generator: yields each SectionResponse as it completes.
+
+    Emission order: overview → parallel group (4) → sequential chain (5).
+    """
+    ctx = await _build_context(project, db)
+    if additional_context:
+        ctx.chat_history += f"\n\nAdditional PM context: {additional_context}"
+
+    llm = _get_proposal_llm()
+
+    overview = await _gen_section(ProposalSectionId.overview, ctx, llm)
+    yield overview
+
+    parallel_results = await asyncio.gather(
+        _gen_section(ProposalSectionId.target_audience, ctx, llm),
+        _gen_section(ProposalSectionId.risks_and_mitigations, ctx, llm),
+        _gen_section(ProposalSectionId.success_metrics, ctx, llm),
+        _fetch_open_questions(ctx),
+        return_exceptions=True,
+    )
+    parallel_ids = [
+        ProposalSectionId.target_audience,
+        ProposalSectionId.risks_and_mitigations,
+        ProposalSectionId.success_metrics,
+        ProposalSectionId.open_questions,
+    ]
+    for result, sid in zip(parallel_results, parallel_ids):
+        yield result if isinstance(result, SectionResponse) else _failed_section(sid, result)
+
+    problem = await _gen_section(ProposalSectionId.problem_statement, ctx, llm)
+    yield problem
+
+    goals = await _gen_section(ProposalSectionId.goals_and_non_goals, ctx, llm, extra=problem.content)
+    yield goals
+
+    features = await _gen_section(ProposalSectionId.key_features, ctx, llm, extra=goals.content)
+    yield features
+
+    tech_req = await _gen_section(ProposalSectionId.technical_requirements, ctx, llm, extra=features.content)
+    yield tech_req
+
+    timeline = await _gen_section(ProposalSectionId.timeline_and_milestones, ctx, llm, extra=features.content)
+    yield timeline
+
+
 async def generate_single_section(
     section_id: ProposalSectionId,
     project: "Project",
@@ -309,5 +360,5 @@ async def generate_single_section(
     ctx = await _build_context(project, db)
     if additional_context:
         ctx.chat_history += f"\n\nAdditional PM context: {additional_context}"
-    llm = _get_claude_sonnet()
+    llm = _get_proposal_llm()
     return await _gen_section(section_id, ctx, llm)

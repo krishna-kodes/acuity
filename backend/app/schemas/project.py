@@ -52,6 +52,7 @@ class TBDItem(BaseModel):
     question: str
     level: int
     resolved: bool
+    status: str = "open"
 
 
 class TechStackResponse(BaseModel):
