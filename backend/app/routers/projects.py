@@ -1683,6 +1683,200 @@ async def estimate_effort(
     )
 
 
+@router.post("/projects/{project_id}/estimate/stream")
+async def estimate_effort_stream(
+    project_id: str,
+    force: bool = False,
+    db: Session = Depends(get_db),
+):
+    """SSE stream: status → epic events (one per breakdown phase) → summary → done."""
+    from app.services.llm_factory import get_llm
+    from app.models.reference import HistoricalProject
+
+    project = _get_project_or_404(project_id, db)
+
+    if project.phase not in _POST_TEAM_PHASES:
+        raise HTTPException(
+            status_code=409,
+            detail="Phase 4 (team suggestion) must be complete before running effort estimation",
+        )
+
+    cached = project.effort_estimates or {}
+    if not force and cached and project.phase in _POST_ESTIMATION_PHASES:
+        async def _cached_gen():
+            yield f'data: {json.dumps({"type": "status", "message": "Loading cached estimation..."})}\n\n'
+            breakdown = cached.get("breakdown", {})
+            epics = []
+            if isinstance(breakdown, dict):
+                for phase_name, pts in breakdown.items():
+                    epic = {"title": phase_name, "estimated_points": int(pts)}
+                    epics.append(epic)
+                    yield f'data: {json.dumps({"type": "epic", **epic})}\n\n'
+            elif isinstance(breakdown, list):
+                for item in breakdown:
+                    if isinstance(item, dict):
+                        epic = {"title": item.get("phase", ""), "estimated_points": int(item.get("points", 0))}
+                        epics.append(epic)
+                        yield f'data: {json.dumps({"type": "epic", **epic})}\n\n'
+            yield f'data: {json.dumps({"type": "summary", "total_points": cached.get("total_points", 0), "total_weeks": cached.get("total_weeks", 0), "confidence": cached.get("confidence", 0.7), "reasoning": cached.get("reasoning", "")})}\n\n'
+            yield f'data: {json.dumps({"type": "done", "epics": epics, "total_points": int(cached.get("total_points", 0)), "total_weeks": float(cached.get("total_weeks", 0))})}\n\n'
+
+        return StreamingResponse(
+            _cached_gen(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+
+    # Build proposal summary (same approach as stack/stream)
+    proposal_sections: dict = {}
+    try:
+        proposal = (
+            db.query(Proposal)
+            .filter(Proposal.project_id == project.id)
+            .order_by(Proposal.id.desc())
+            .first()
+        )
+        if proposal and proposal.sections_json:
+            for s in json.loads(proposal.sections_json):
+                proposal_sections[s["section_id"]] = s
+    except Exception:
+        pass
+
+    _SECTION_KEYS = ("overview", "technical_requirements", "key_features", "problem_statement")
+    section_parts = []
+    for k in _SECTION_KEYS:
+        sec = proposal_sections.get(k) or {}
+        title = sec.get("title") or k.replace("_", " ").title()
+        content = sec.get("content", "").strip()
+        if content:
+            section_parts.append(f"### {title}\n{content}")
+    proposal_summary = "\n\n".join(section_parts) if section_parts else "No proposal context available."
+
+    team_suggestion = project.team_suggestion or {}
+    team_size = len(team_suggestion.get("members", [])) or 3
+
+    modules_text = ""
+    try:
+        if project.modules_json:
+            mods = json.loads(project.modules_json)
+            if mods:
+                modules_text = "\n\nModules breakdown:\n" + json.dumps(
+                    [{"title": m["title"], "label": m["label"]} for m in mods], indent=2
+                )
+    except Exception:
+        pass
+
+    async def _generate():
+        yield f'data: {json.dumps({"type": "status", "message": "Fetching historical projects..."})}\n\n'
+
+        try:
+            hist = db.query(HistoricalProject).limit(10).all()
+            refs = "\n".join(
+                f"- {p.name}: {p.duration_weeks or '?'}w, {p.team_size or '?'} devs, {p.estimated_points or '?'} pts"
+                for p in hist
+            ) or "No reference projects available."
+        except Exception:
+            refs = "No reference projects available."
+
+        yield f'data: {json.dumps({"type": "status", "message": "Analyzing requirements and computing estimates..."})}\n\n'
+
+        prompt = (
+            f"Estimate effort for this project:\n{proposal_summary}"
+            f"{modules_text}\n\n"
+            f"Team size: {team_size}\n\n"
+            f"Reference projects:\n{refs}\n\n"
+            "Return ONLY valid JSON with these exact fields:\n"
+            '{"total_weeks": <int>, "total_points": <int>, "confidence": <float 0.0-1.0>, '
+            '"breakdown": [{"phase": "<name>", "points": <int>}, ...], "reasoning": "<explanation>"}'
+        )
+
+        llm = get_llm(fast=True)
+        buffer = ""
+        full_buffer = ""
+        emitted_phases: set[str] = set()
+        epics: list[dict] = []
+        total_weeks = 0
+        total_points = 0
+        confidence = 0.7
+        reasoning = ""
+
+        try:
+            async for chunk in llm.astream(prompt):
+                token = chunk.content if hasattr(chunk, "content") else str(chunk)
+                buffer += token
+                full_buffer += token
+
+                last_end = 0
+                for m in re.finditer(r'\{"phase":\s*"([^"]+)",\s*"points":\s*(\d+)\}', buffer):
+                    phase_name = m.group(1)
+                    points = int(m.group(2))
+                    if phase_name not in emitted_phases:
+                        emitted_phases.add(phase_name)
+                        epic = {"title": phase_name, "estimated_points": points}
+                        epics.append(epic)
+                        yield f'data: {json.dumps({"type": "epic", **epic})}\n\n'
+                    last_end = m.end()
+                if last_end > 0:
+                    buffer = buffer[last_end:]
+
+            # Parse full buffer for summary fields + catch any missed breakdown items
+            try:
+                cleaned = re.sub(r"```(?:json)?\s*", "", full_buffer).strip().rstrip("`").strip()
+                parsed = json.loads(cleaned)
+                total_weeks = int(parsed.get("total_weeks", 0))
+                total_points = int(parsed.get("total_points", 0))
+                confidence = float(parsed.get("confidence", 0.7))
+                reasoning = str(parsed.get("reasoning", ""))
+                for item in parsed.get("breakdown", []):
+                    if isinstance(item, dict):
+                        phase_name = item.get("phase", "")
+                        points = int(item.get("points", 0))
+                        if phase_name and phase_name not in emitted_phases:
+                            emitted_phases.add(phase_name)
+                            epic = {"title": phase_name, "estimated_points": points}
+                            epics.append(epic)
+                            yield f'data: {json.dumps({"type": "epic", **epic})}\n\n'
+            except Exception:
+                m_weeks = re.search(r'"total_weeks":\s*(\d+)', full_buffer)
+                if m_weeks:
+                    total_weeks = int(m_weeks.group(1))
+                m_points = re.search(r'"total_points":\s*(\d+)', full_buffer)
+                if m_points:
+                    total_points = int(m_points.group(1))
+                m_conf = re.search(r'"confidence":\s*([\d.]+)', full_buffer)
+                if m_conf:
+                    confidence = min(1.0, max(0.0, float(m_conf.group(1))))
+                m_reasoning = re.search(r'"reasoning":\s*"((?:[^"\\]|\\.)*)"', full_buffer)
+                if m_reasoning:
+                    try:
+                        reasoning = json.loads(f'"{m_reasoning.group(1)}"')
+                    except Exception:
+                        reasoning = m_reasoning.group(1)
+
+            yield f'data: {json.dumps({"type": "summary", "total_points": total_points, "total_weeks": total_weeks, "confidence": confidence, "reasoning": reasoning})}\n\n'
+            yield f'data: {json.dumps({"type": "done", "epics": epics, "total_points": total_points, "total_weeks": float(total_weeks)})}\n\n'
+
+        finally:
+            if epics or total_points:
+                breakdown_dict = {e["title"]: e["estimated_points"] for e in epics}
+                project.effort_estimates = {
+                    "total_weeks": total_weeks,
+                    "total_points": total_points,
+                    "confidence": confidence,
+                    "breakdown": breakdown_dict,
+                    "reasoning": reasoning,
+                }
+                if project.phase == ProjectPhase.team:
+                    project.phase = ProjectPhase.estimation
+                db.commit()
+
+    return StreamingResponse(
+        _generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 @router.post("/projects/{project_id}/epics")
 async def generate_epics(
     project_id: str,
