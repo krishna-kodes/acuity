@@ -27,6 +27,18 @@ export const getTBDs = (projectId: string) =>
     params: { path: { project_id: projectId } },
   })
 
+export interface StoredChatMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+export const getChatHistory = async (projectId: string): Promise<StoredChatMessage[]> => {
+  const base = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+  const res = await fetch(`${base}/api/v1/projects/${projectId}/chat-history`);
+  if (!res.ok) return [];
+  return res.json();
+};
+
 export const getRedactionDecisions = (projectId: string) =>
   apiClient.GET("/api/v1/projects/{project_id}/redaction-decisions", {
     params: { path: { project_id: projectId } },
@@ -319,7 +331,7 @@ export async function updateTeam(
 
 export type ProposalSection = { heading: string; body: string }
 
-export type SectionStatus = "generated" | "draft" | "failed"
+export type SectionStatus = "generated" | "draft" | "failed" | "generating"
 
 export type RiskItem = { risk: string; mitigation: string }
 export type PersonaItem = { name: string; role: string; needs: string }
@@ -367,6 +379,37 @@ export async function generateProposalRaw(projectId: string): Promise<ProposalDa
   return res.json()
 }
 
+export async function generateProposalStream(
+  projectId: string,
+  onSection: (section: StructuredSection) => void,
+  onDone: (proposal: ProposalData) => void,
+): Promise<void> {
+  const res = await fetch(`${_apiBase()}/api/v1/projects/${projectId}/proposal/stream`, { method: "POST" })
+  if (!res.ok) throw new Error(`Generate failed: ${res.status}`)
+
+  const reader = res.body!.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ""
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split("\n")
+    buffer = lines.pop() ?? ""
+    for (const line of lines) {
+      if (!line.startsWith("data: ")) continue
+      const data = line.slice(6).trim()
+      if (!data) continue
+      try {
+        const event = JSON.parse(data)
+        if (event.type === "section") onSection(event.section as StructuredSection)
+        else if (event.type === "done") onDone(event.proposal as ProposalData)
+      } catch { /* skip malformed SSE line */ }
+    }
+  }
+}
+
 export async function retryProposal(projectId: string, comment: string): Promise<ProposalData> {
   const res = await fetch(`${_apiBase()}/api/v1/projects/${projectId}/proposal/retry`, {
     method: "POST",
@@ -375,6 +418,42 @@ export async function retryProposal(projectId: string, comment: string): Promise
   })
   if (!res.ok) throw new Error(`Retry failed: ${res.status}`)
   return res.json()
+}
+
+export async function retryProposalStream(
+  projectId: string,
+  comment: string,
+  onSection: (section: StructuredSection) => void,
+  onDone: (proposal: ProposalData) => void,
+): Promise<void> {
+  const res = await fetch(`${_apiBase()}/api/v1/projects/${projectId}/proposal/retry/stream`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ comment }),
+  })
+  if (!res.ok) throw new Error(`Retry failed: ${res.status}`)
+
+  const reader = res.body!.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ""
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split("\n")
+    buffer = lines.pop() ?? ""
+    for (const line of lines) {
+      if (!line.startsWith("data: ")) continue
+      const data = line.slice(6).trim()
+      if (!data) continue
+      try {
+        const event = JSON.parse(data)
+        if (event.type === "section") onSection(event.section as StructuredSection)
+        else if (event.type === "done") onDone(event.proposal as ProposalData)
+      } catch { /* malformed SSE line — skip */ }
+    }
+  }
 }
 
 export async function approveProposal(projectId: string): Promise<ProposalData> {
@@ -406,6 +485,43 @@ export async function extractModules(projectId: string): Promise<ModulesData> {
   const res = await fetch(`${_apiBase()}/api/v1/projects/${projectId}/modules`, { method: "POST" })
   if (!res.ok) throw new Error(`Extract modules failed: ${res.status}`)
   return res.json()
+}
+
+export async function extractModulesStream(
+  projectId: string,
+  onStatus: (status: string) => void,
+  onModule: (module: Module) => void,
+  onDone: (result: { modules: Module[]; count: number }) => void,
+): Promise<void> {
+  const res = await fetch(
+    `${_apiBase()}/api/v1/projects/${projectId}/modules/stream`,
+    { method: "POST" },
+  )
+  if (!res.ok) throw new Error(`Extract modules stream failed: ${res.status}`)
+
+  const reader = res.body!.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ""
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split("\n")
+    buffer = lines.pop() ?? ""
+    for (const line of lines) {
+      if (!line.startsWith("data: ")) continue
+      const data = line.slice(6).trim()
+      if (!data) continue
+      try {
+        const event = JSON.parse(data)
+        if (event.type === "status") onStatus(event.status as string)
+        else if (event.type === "module") onModule(event.module as Module)
+        else if (event.type === "done")
+          onDone({ modules: event.modules as Module[], count: event.count as number })
+      } catch { /* skip malformed SSE line */ }
+    }
+  }
 }
 
 export async function getModules(projectId: string): Promise<ModulesData> {
