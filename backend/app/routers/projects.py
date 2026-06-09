@@ -191,7 +191,11 @@ async def _run_proposal_generation(
 
     # DOCX with structured sections
     sections_dicts = [s.model_dump(mode="json") for s in structured_sections]
-    content_path = generate_proposal_docx(project.id, content, structured_sections=sections_dicts)
+    from app.services.branding import get_branding
+    branding = get_branding(db)
+    content_path = generate_proposal_docx(
+        project.id, content, structured_sections=sections_dicts, branding=branding
+    )
 
     # Persist proposal row
     doc = db.query(Document).filter(Document.project_id == project.id).first()
