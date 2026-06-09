@@ -1395,11 +1395,11 @@ async def suggest_stack(
     )
 
 
-@router.get("/projects/{project_id}/stack")
+@router.get("/projects/{project_id}/stack", response_model=None)
 def get_stack(
     project_id: str,
     db: Session = Depends(get_db),
-) -> Response | TechStackResponse:
+):
     """Return cached tech stack or 204 if not yet generated."""
     project = _get_project_or_404(project_id, db)
     cached = project.tech_stack or {}
@@ -1411,6 +1411,144 @@ def get_stack(
         database=cached.get("database", []),
         infra=cached.get("infra", []),
         rationale=cached.get("rationale", ""),
+    )
+
+
+@router.post("/projects/{project_id}/stack/stream")
+async def suggest_stack_stream(
+    project_id: str,
+    db: Session = Depends(get_db),
+):
+    """SSE stream: emits status → category events → rationale → done for tech stack generation."""
+    from app.services.llm_factory import get_llm
+    from app.models.reference import ApprovedTechnology
+
+    project = _get_project_or_404(project_id, db)
+
+    if project.phase not in _POST_MODULES_PHASES:
+        raise HTTPException(
+            status_code=409,
+            detail="Phase 3 (modules) must be complete before running tech stack suggestion",
+        )
+
+    cached = project.tech_stack or {}
+    if cached and project.phase in _POST_STACK_PHASES:
+        async def _cached_gen():
+            for key in ("frontend", "backend", "database", "infra"):
+                yield f'data: {json.dumps({"type": "category", "key": key, "items": cached.get(key, [])})}\n\n'
+            if cached.get("rationale"):
+                yield f'data: {json.dumps({"type": "rationale", "text": cached["rationale"]})}\n\n'
+            yield f'data: {json.dumps({"type": "done", "stack": cached})}\n\n'
+
+        return StreamingResponse(
+            _cached_gen(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+
+    techs = db.query(ApprovedTechnology).all()
+    tech_descriptions = "\n".join(
+        f"- {t.name} ({t.category}): {t.tags or ''}" for t in techs
+    ) or "No approved technologies in database."
+
+    proposal_sections: dict = {}
+    try:
+        proposal = (
+            db.query(Proposal)
+            .filter(Proposal.project_id == project.id)
+            .order_by(Proposal.id.desc())
+            .first()
+        )
+        if proposal and proposal.sections_json:
+            for s in json.loads(proposal.sections_json):
+                proposal_sections[s["section_id"]] = s
+    except Exception:
+        pass
+
+    _SECTION_KEYS = ("overview", "technical_requirements", "key_features", "problem_statement")
+    section_parts = []
+    for k in _SECTION_KEYS:
+        sec = proposal_sections.get(k) or {}
+        title = sec.get("title") or k.replace("_", " ").title()
+        content = sec.get("content", "").strip()
+        if content:
+            section_parts.append(f"### {title}\n{content}")
+    proposal_summary = "\n\n".join(section_parts) if section_parts else "No proposal context available."
+
+    prompt = (
+        f"Given this project proposal:\n{proposal_summary}\n\n"
+        f"Select the most appropriate technologies from this approved list:\n{tech_descriptions}\n\n"
+        "Choose 1-3 per category. Respond ONLY with valid JSON:\n"
+        '{"frontend": [...], "backend": [...], "database": [...], "infra": [...], "rationale": "..."}'
+    )
+
+    llm = get_llm(fast=False)
+
+    async def _generate():
+        yield f'data: {json.dumps({"type": "status", "message": "Analyzing requirements..."})}\n\n'
+
+        buffer = ""
+        emitted_keys: set[str] = set()
+        tech_stack: dict = {}
+
+        try:
+            async for chunk in llm.astream(prompt):
+                token = chunk.content if hasattr(chunk, "content") else str(chunk)
+                buffer += token
+
+                for key in ("frontend", "backend", "database", "infra"):
+                    if key in emitted_keys:
+                        continue
+                    m = re.search(rf'"{key}":\s*(\[[^\]]*\])', buffer)
+                    if m:
+                        try:
+                            items = json.loads(m.group(1))
+                            if isinstance(items, list):
+                                emitted_keys.add(key)
+                                tech_stack[key] = items
+                                yield f'data: {json.dumps({"type": "category", "key": key, "items": items})}\n\n'
+                        except json.JSONDecodeError:
+                            pass
+
+                if "rationale" not in emitted_keys:
+                    m = re.search(r'"rationale":\s*"((?:[^"\\]|\\.)*)"', buffer)
+                    if m:
+                        try:
+                            rationale = json.loads(f'"{m.group(1)}"')
+                            emitted_keys.add("rationale")
+                            tech_stack["rationale"] = rationale
+                            yield f'data: {json.dumps({"type": "rationale", "text": rationale})}\n\n'
+                        except json.JSONDecodeError:
+                            pass
+
+            # Fallback: parse full buffer for keys the regex missed
+            if len(emitted_keys) < 5:
+                try:
+                    cleaned = re.sub(r"```(?:json)?\s*", "", buffer).strip().rstrip("`").strip()
+                    parsed = json.loads(cleaned)
+                    for key in ("frontend", "backend", "database", "infra"):
+                        if key not in emitted_keys and isinstance(parsed.get(key), list):
+                            tech_stack[key] = parsed[key]
+                            yield f'data: {json.dumps({"type": "category", "key": key, "items": parsed[key]})}\n\n'
+                    if "rationale" not in emitted_keys and isinstance(parsed.get("rationale"), str):
+                        tech_stack["rationale"] = parsed["rationale"]
+                        yield f'data: {json.dumps({"type": "rationale", "text": parsed["rationale"]})}\n\n'
+                except Exception:
+                    pass
+
+            yield f'data: {json.dumps({"type": "done", "stack": tech_stack})}\n\n'
+
+        finally:
+            if tech_stack:
+                project.tech_stack = tech_stack
+                if project.phase == ProjectPhase.chat:
+                    project.phase = ProjectPhase.techstack
+                db.commit()
+
+    return StreamingResponse(
+        _generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
 
