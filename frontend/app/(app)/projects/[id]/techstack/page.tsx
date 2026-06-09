@@ -55,7 +55,7 @@ export default function TechStackPage({ params }: { params: Promise<{ id: string
   // Prevents React StrictMode double-fire from triggering two LLM calls
   const stackFiredRef = useRef(false);
 
-  async function runStackGeneration(isCancelled?: () => boolean) {
+  async function runStackGeneration(isCancelled?: () => boolean, force = false) {
     setGenerating(true);
     setStackStatus("started");
     setStack({});
@@ -87,6 +87,7 @@ export default function TechStackPage({ params }: { params: Promise<{ id: string
             setStackStatus("done");
           }
         },
+        force,
       );
     } catch {
       if (!isCancelled?.()) {
@@ -147,7 +148,7 @@ export default function TechStackPage({ params }: { params: Promise<{ id: string
           <button
             onClick={() => {
               stackFiredRef.current = true;
-              runStackGeneration();
+              runStackGeneration(undefined, true);
             }}
             disabled={generating}
             className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border border-border bg-card hover:bg-surface-subtle transition-colors disabled:opacity-50"

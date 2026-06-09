@@ -140,7 +140,9 @@ def test_stack_stream_returns_event_stream_cached(client, project_id, db_session
     lines = [l for l in resp.text.split("\n") if l.startswith("data: ")]
     events = [_json.loads(l[6:]) for l in lines]
     types = [e["type"] for e in events]
+    assert "status" in types
     assert "category" in types
+    assert "rationale" in types
     assert "done" in types
 
     category_events = [e for e in events if e["type"] == "category"]

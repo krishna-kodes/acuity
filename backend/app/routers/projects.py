@@ -1417,6 +1417,7 @@ def get_stack(
 @router.post("/projects/{project_id}/stack/stream")
 async def suggest_stack_stream(
     project_id: str,
+    force: bool = False,
     db: Session = Depends(get_db),
 ):
     """SSE stream: emits status → category events → rationale → done for tech stack generation."""
@@ -1432,8 +1433,9 @@ async def suggest_stack_stream(
         )
 
     cached = project.tech_stack or {}
-    if cached and project.phase in _POST_STACK_PHASES:
+    if not force and cached and project.phase in _POST_STACK_PHASES:
         async def _cached_gen():
+            yield f'data: {json.dumps({"type": "status", "message": "Loading cached stack..."})}\n\n'
             for key in ("frontend", "backend", "database", "infra"):
                 yield f'data: {json.dumps({"type": "category", "key": key, "items": cached.get(key, [])})}\n\n'
             if cached.get("rationale"):
@@ -1547,8 +1549,6 @@ async def suggest_stack_stream(
         finally:
             if tech_stack:
                 project.tech_stack = tech_stack
-                if project.phase == ProjectPhase.chat:
-                    project.phase = ProjectPhase.techstack
                 db.commit()
 
     return StreamingResponse(

@@ -572,11 +572,12 @@ export async function suggestStackStream(
   onCategory: (key: string, items: string[]) => void,
   onRationale: (text: string) => void,
   onDone: (stack: TechStackData) => void,
+  force = false,
 ): Promise<void> {
-  const res = await fetch(
-    `${_apiBase()}/api/v1/projects/${projectId}/stack/stream`,
-    { method: "POST" },
-  )
+  const url = force
+    ? `${_apiBase()}/api/v1/projects/${projectId}/stack/stream?force=true`
+    : `${_apiBase()}/api/v1/projects/${projectId}/stack/stream`
+  const res = await fetch(url, { method: "POST" })
   if (!res.ok) throw new Error(`Stack stream failed: ${res.status}`)
   if (!res.body) throw new Error("Stack stream: response body is null")
 
