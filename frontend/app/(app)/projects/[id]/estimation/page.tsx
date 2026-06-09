@@ -6,7 +6,7 @@ import { PhaseProgressStepper } from "@/components/phase-progress-stepper";
 import { MetricsStatCard } from "@/components/metrics-stat-card";
 import { getPhasesForRoute, getNextPhaseRoute } from "@/lib/project-phases";
 import { cn } from "@/lib/utils";
-import { estimateEffort, getModules, getEstimateExportUrl } from "@/lib/api";
+import { estimateEffort, getModules } from "@/lib/api";
 import type { Module } from "@/lib/api";
 
 interface EpicEstimate {
@@ -156,43 +156,7 @@ export default function EstimationPage({ params }: { params: Promise<{ id: strin
           </div>
         )}
 
-        <div className="flex items-center justify-between pt-2 border-t border-border">
-          {/* Export buttons */}
-          <div className="flex items-center gap-2">
-            <a
-              href={getEstimateExportUrl(id, "csv")}
-              download
-              aria-disabled={loading || !effort}
-              className={cn(
-                "inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-sm font-medium border border-border transition-colors",
-                loading || !effort
-                  ? "pointer-events-none opacity-40 text-text-muted"
-                  : "text-foreground hover:bg-surface-subtle"
-              )}
-            >
-              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 14 14" stroke="currentColor" strokeWidth={2}>
-                <path d="M7 2v7M4 6l3 3 3-3M2 11h10" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-              Export CSV
-            </a>
-            <a
-              href={getEstimateExportUrl(id, "xlsx")}
-              download
-              aria-disabled={loading || !effort}
-              className={cn(
-                "inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-sm font-medium border border-border transition-colors",
-                loading || !effort
-                  ? "pointer-events-none opacity-40 text-text-muted"
-                  : "text-foreground hover:bg-surface-subtle"
-              )}
-            >
-              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 14 14" stroke="currentColor" strokeWidth={2}>
-                <path d="M7 2v7M4 6l3 3 3-3M2 11h10" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-              Export XLSX
-            </a>
-          </div>
-
+        <div className="flex items-center justify-end pt-2 border-t border-border">
           {/* Proceed */}
           <button
             onClick={handleProceed}

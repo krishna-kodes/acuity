@@ -14,6 +14,7 @@ import {
   triggerEpics,
   getSyncConfig,
   updateSyncConfig,
+  getEstimateExportUrl,
 } from "@/lib/api";
 import type { SyncProvider, SyncConfig, SyncConfigResponse } from "@/lib/api";
 
@@ -347,6 +348,26 @@ export default function EpicsPage({ params }: { params: Promise<{ id: string }> 
                   View on GitHub
                 </a>
               )}
+              <a
+                href={getEstimateExportUrl(id, "csv")}
+                download
+                className="inline-flex items-center gap-1.5 text-xs text-text-secondary hover:text-foreground border border-border rounded px-2.5 py-1 transition-colors"
+              >
+                <svg className="w-3 h-3" fill="none" viewBox="0 0 14 14" stroke="currentColor" strokeWidth={2}>
+                  <path d="M7 2v7M4 6l3 3 3-3M2 11h10" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                CSV
+              </a>
+              <a
+                href={getEstimateExportUrl(id, "xlsx")}
+                download
+                className="inline-flex items-center gap-1.5 text-xs text-text-secondary hover:text-foreground border border-border rounded px-2.5 py-1 transition-colors"
+              >
+                <svg className="w-3 h-3" fill="none" viewBox="0 0 14 14" stroke="currentColor" strokeWidth={2}>
+                  <path d="M7 2v7M4 6l3 3 3-3M2 11h10" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                XLSX
+              </a>
               <button
                 onClick={() => setShowConfig(true)}
                 className="text-xs text-text-secondary hover:text-foreground border border-border rounded px-2.5 py-1 transition-colors"
