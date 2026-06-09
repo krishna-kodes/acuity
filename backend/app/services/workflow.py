@@ -521,8 +521,7 @@ async def _phase_3_stack_node(state: ProjectState) -> dict[str, Any]:
         tech_stack = result.model_dump() if hasattr(result, "model_dump") else _FALLBACK_STACK
         ps["phase_3"] = "complete"
     except Exception as exc:
-        _pid = int(state["project_id"]) if state.get("project_id") else 0
-        record_error(_pid, "phase_3", type(exc).__name__, str(exc))
+        record_error(int(state["project_id"]), "phase_3", type(exc).__name__, str(exc))
         tech_stack = _FALLBACK_STACK
         ps["phase_3"] = "complete"
 

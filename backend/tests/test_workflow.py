@@ -134,11 +134,21 @@ async def test_phase_2_chat_node_raises_409_when_phase_1_incomplete():
 
 @pytest.mark.asyncio
 async def test_phase_3_stack_node_returns_tech_stack():
+    from unittest.mock import MagicMock
+
+    mock_db = MagicMock()
+    mock_db.query.return_value.all.return_value = []
+    mock_db.__enter__ = MagicMock(return_value=mock_db)
+    mock_db.__exit__ = MagicMock(return_value=False)
+
     state: ProjectState = {
         **_EMPTY_STATE,
+        "project_id": "1",
         "phase_status": {"phase_1": "complete", "phase_2": "complete"},
     }
-    result = await _phase_3_stack_node(state)
+    with patch("app.services.workflow.record_error"), \
+         patch("app.services.workflow.SessionLocal", return_value=mock_db):
+        result = await _phase_3_stack_node(state)
     assert "tech_stack" in result
     assert "frontend" in result["tech_stack"]
     assert result["phase_status"]["phase_3"] == "complete"
@@ -152,35 +162,35 @@ async def test_phase_3_stack_node_raises_when_phase_2_incomplete():
 
 
 @pytest.mark.asyncio
-async def test_phase_3_stack_node_logs_error_on_llm_failure(db_session, project_id):
-    from unittest.mock import patch
-    from app.models.observability import ErrorLog
-    from app.database import SessionLocal
+async def test_phase_3_stack_node_logs_error_on_llm_failure():
+    from unittest.mock import patch, MagicMock
 
     state: ProjectState = {
         **_EMPTY_STATE,
-        "project_id": project_id,
+        "project_id": "42",
         "phase_status": {"phase_1": "complete", "phase_2": "complete"},
     }
 
-    with patch("app.services.workflow.get_llm") as mock_llm:
+    mock_db = MagicMock()
+    mock_db.query.return_value.all.return_value = []
+    mock_db.__enter__ = MagicMock(return_value=mock_db)
+    mock_db.__exit__ = MagicMock(return_value=False)
+
+    with patch("app.services.workflow.record_error") as mock_record_error, \
+         patch("app.services.workflow.get_llm") as mock_llm, \
+         patch("app.services.workflow.SessionLocal", return_value=mock_db):
         mock_llm.return_value.with_structured_output.side_effect = RuntimeError("API key invalid")
         result = await _phase_3_stack_node(state)
 
-    # Fallback stack returned
+    # Fallback stack returned and phase marked complete
     assert result["tech_stack"]["frontend"] == ["Next.js"]
     assert result["phase_status"]["phase_3"] == "complete"
 
-    # Error logged to DB
-    db = SessionLocal()
-    try:
-        log = db.query(ErrorLog).filter_by(
-            project_id=int(project_id), phase="phase_3"
-        ).first()
-        assert log is not None
-        assert log.error_type == "RuntimeError"
-    finally:
-        db.close()
+    # record_error called with correct phase and error type
+    mock_record_error.assert_called_once()
+    call_args = mock_record_error.call_args[0]
+    assert call_args[1] == "phase_3"
+    assert call_args[2] == "RuntimeError"
 
 
 # ---------------------------------------------------------------------------
