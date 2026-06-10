@@ -2,8 +2,6 @@
 
 **Project:** AI-Driven Project Management Tool  
 **Author:** Krishna Kumar  
-**Version:** 2.0 (June 2026 — Week 11, Evals phase)  
-**Status:** Living document. Where this file conflicts with `CLAUDE.md`, **CLAUDE.md wins**.
 
 ---
 
@@ -785,5 +783,3 @@ Add to `.gitignore`: `.env`, `chroma_db/`, `project_state.db`, `app.db`, `docume
 - Cloud deployment (Railway, Render, or AWS)
 
 ---
-
-*v2 generated June 2026 — Week 11, AI Engineering Cohort Capstone. Supersedes v1 (original submission artifact).*
