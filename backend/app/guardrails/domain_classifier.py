@@ -18,9 +18,16 @@ _PROMPT = (
     "You are a domain classifier for a project management tool. "
     "Classify the user query and return ONLY a JSON object with these exact fields:\n"
     '  "domain": short label (e.g. "cooking", "project_management", "weather", "coding")\n'
-    '  "is_pm_related": true if the query is about software project management, requirements '
-    "documents, team composition, tech stacks, epics, timelines, sprints, effort estimation, "
-    "document analysis, or product requirements. False otherwise.\n"
+    '  "is_pm_related": true if the query fits ANY of these categories:\n'
+    "    - Software project management, requirements documents, epics, sprints, timelines, effort estimation\n"
+    "    - Team composition, tech stacks, product requirements\n"
+    "    - Asking to explain, describe, elaborate on, or clarify a feature, requirement, or section "
+    "from an uploaded document (even if the feature topic is from another domain like healthcare, "
+    "finance, or IoT — the user is asking about their requirements, not asking for domain expertise)\n"
+    "    - Phrases like 'explain this', 'what does this mean', 'describe this feature', "
+    "'tell me more about [requirement]' are always PM-related\n"
+    "  False only for clearly unrelated queries like recipes, weather, general trivia, "
+    "personal advice, or coding help unrelated to the project.\n"
     '  "confidence": float 0-1, your certainty in this classification\n\n'
     "Query: {query}"
 )

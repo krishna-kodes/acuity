@@ -74,7 +74,7 @@ def _add_formatted_runs(para, text: str) -> None:
 # Markdown-to-Word body renderer
 # ---------------------------------------------------------------------------
 
-def _add_markdown_body(doc, text: str, secondary_hex: str | None = None) -> None:
+def _add_markdown_body(doc, text: str, secondary_hex: str | None = None, primary_hex: str = _HEADER_FILL) -> None:
     """Convert LLM markdown output to native Word elements.
 
     Handles:
@@ -91,13 +91,39 @@ def _add_markdown_body(doc, text: str, secondary_hex: str | None = None) -> None
 
     lines = text.splitlines()
     para_lines: list[str] = []
+    table_rows: list[list[str]] = []
 
     def _apply_secondary(heading_para) -> None:
         if secondary_hex:
             for run in heading_para.runs:
                 run.font.color.rgb = _hex_to_rgb(secondary_hex)
 
+    def _is_table_separator(line: str) -> bool:
+        return bool(re.fullmatch(r"[\|\s\-:]+", line.strip()))
+
+    def _parse_table_row(line: str) -> list[str]:
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        return cells
+
+    def flush_table() -> None:
+        if not table_rows:
+            return
+        cols = max(len(r) for r in table_rows)
+        table = doc.add_table(rows=len(table_rows), cols=cols)
+        table.style = "Table Grid"
+        for r_idx, row_cells in enumerate(table_rows):
+            for c_idx in range(cols):
+                cell_text = row_cells[c_idx] if c_idx < len(row_cells) else ""
+                cell = table.cell(r_idx, c_idx)
+                cell.text = cell_text
+                if r_idx == 0:
+                    for run in cell.paragraphs[0].runs:
+                        run.bold = True
+        _style_table_header(table, primary_hex if primary_hex else _HEADER_FILL)
+        table_rows.clear()
+
     def flush() -> None:
+        flush_table()
         if not para_lines:
             return
         combined = " ".join(l for l in para_lines if l.strip())
@@ -131,6 +157,20 @@ def _add_markdown_body(doc, text: str, secondary_hex: str | None = None) -> None
             heading_text = stripped.strip().lstrip("*").rstrip("*:").strip()
             h = doc.add_heading(heading_text, level=3)
             h.paragraph_format.keep_with_next = True
+
+        # Markdown table row: starts and ends with |
+        elif stripped.startswith("|"):
+            if _is_table_separator(stripped):
+                pass  # skip separator rows (|---|---|)
+            else:
+                if para_lines:
+                    # flush prose before table starts
+                    combined = " ".join(l for l in para_lines if l.strip())
+                    if combined.strip():
+                        p = doc.add_paragraph()
+                        _add_formatted_runs(p, combined.strip())
+                    para_lines.clear()
+                table_rows.append(_parse_table_row(stripped))
 
         # Bullet: -, *, • (optionally indented)
         elif re.match(r"^(\s*)[-*•] .+", stripped):
@@ -349,7 +389,7 @@ def generate_proposal_docx(
                     row.cells[2].text = str(item.get("description", ""))
 
             else:
-                _add_markdown_body(doc, body, secondary_hex=secondary_hex)
+                _add_markdown_body(doc, body, secondary_hex=secondary_hex, primary_hex=primary_hex)
 
     else:
         for section in content.sections:

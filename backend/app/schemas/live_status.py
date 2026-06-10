@@ -1,7 +1,9 @@
 from pydantic import BaseModel
 
 PHASE_AGENT_NAMES = {
+    "phase_1": "pii_filter",
     "phase_2": "chat_agent",
+    "modules": "module_extractor",
     "phase_3": "stack_advisor",
     "phase_4": "team_planner",
     "phase_5": "effort_estimator",

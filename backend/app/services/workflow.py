@@ -533,11 +533,18 @@ async def _phase_4_team_node(state: ProjectState) -> dict[str, Any]:
     import time as _time
     _require_phase_complete(state, 4)
 
+    import re as _re2
+
+    def _extract_tech_name(entry: str) -> str:
+        return _re2.split(r"\s*[\(:]", entry)[0].strip()
+
     tech_stack = state.get("tech_stack") or {}
-    all_technologies = (
-        tech_stack.get("frontend", []) + tech_stack.get("backend", []) +
-        tech_stack.get("database", []) + tech_stack.get("infra", [])
-    )
+    all_technologies = [
+        _extract_tech_name(t) for t in (
+            tech_stack.get("frontend", []) + tech_stack.get("backend", []) +
+            tech_stack.get("database", []) + tech_stack.get("infra", [])
+        )
+    ]
 
     _t0 = _time.monotonic()
 
@@ -618,10 +625,17 @@ def suggest_team_direct(tech_stack: dict) -> dict:
     from sqlalchemy.orm import joinedload as _jl
     from app.models.project import Project as _Project
 
-    all_technologies = (
+    import re as _re
+
+    def _extract_name(entry: str) -> str:
+        """Strip ' (category): tags' suffix — e.g. 'React (frontend): SPA,...' → 'React'."""
+        return _re.split(r"\s*[\(:]", entry)[0].strip()
+
+    all_technologies_raw = (
         tech_stack.get("frontend", []) + tech_stack.get("backend", []) +
         tech_stack.get("database", []) + tech_stack.get("infra", [])
     )
+    all_technologies = [_extract_name(t) for t in all_technologies_raw]
 
     if all_technologies:
         members: list[dict] = get_employees.func(all_technologies)
