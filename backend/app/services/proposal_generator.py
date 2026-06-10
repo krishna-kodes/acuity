@@ -104,11 +104,17 @@ def _try_parse_items(
     if section_id not in TYPED_SECTIONS:
         return None
     try:
-        # Strip markdown code fences if present
+        import re as _re
         text = raw.strip()
+        # Strip markdown code fences if present
         if text.startswith("```"):
             lines = text.splitlines()
             text = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
+        # Extract JSON array even if surrounded by prose
+        if not text.startswith("["):
+            m = _re.search(r"\[[\s\S]*\]", text)
+            if m:
+                text = m.group()
         data = json.loads(text)
         if not isinstance(data, list):
             return None

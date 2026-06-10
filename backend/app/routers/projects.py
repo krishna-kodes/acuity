@@ -538,9 +538,20 @@ async def upload_document(
     db.commit()
     db.refresh(doc)
 
-    background_tasks.add_task(
-        ingest_document, doc.id, int(project_id), file_path, db
-    )
+    _doc_id = doc.id
+    _proj_id = int(project_id)
+
+    async def _ingest_with_own_session():
+        from app.database import SessionLocal as _SL
+        _db = _SL()
+        try:
+            await ingest_document(_doc_id, _proj_id, file_path, _db)
+        except Exception:
+            pass
+        finally:
+            _db.close()
+
+    background_tasks.add_task(_ingest_with_own_session)
 
     return DocumentResponse(
         id=str(doc.id),
@@ -683,6 +694,9 @@ async def pii_llm_filter(
     candidate_texts = [c["text"] for c in candidates]
 
     keep_texts: list[str] = list(candidate_texts)  # default: keep all (safe fallback)
+    import time as _time
+    from app.services.metrics_tracker import record_tokens, record_latency, calc_cost
+    _t0 = _time.monotonic()
     try:
         llm = get_llm()
         prompt = (
@@ -700,6 +714,12 @@ async def pii_llm_filter(
         if m:
             parsed = json.loads(m.group())
             keep_texts = [t.strip() for t in parsed.get("keep", []) if isinstance(t, str)]
+        usage = getattr(resp, "usage_metadata", None) or {}
+        in_tok = int(usage.get("input_tokens", 0))
+        out_tok = int(usage.get("output_tokens", 0))
+        model_name = getattr(llm, "model_name", None) or getattr(llm, "model", "unknown")
+        record_tokens(int(project_id), "phase_1", model_name, in_tok, out_tok, calc_cost(in_tok, out_tok))
+        record_latency(int(project_id), "phase_1", "pii_llm_filter", (_time.monotonic() - _t0) * 1000)
     except Exception:
         pass  # safe fallback: keep_texts already set to all candidates
 
@@ -1084,9 +1104,23 @@ async def extract_modules(
             '{"modules": [{"id": "<uuid4>", "title": "...", "label": "...", "description": "..."}, ...]}'
         )
         try:
+            import time as _time
             from app.services.llm_factory import get_llm
+            from app.services.metrics_tracker import calc_cost, record_latency, record_tokens
+            t0 = _time.monotonic()
             result = await get_llm().ainvoke(prompt)
+            elapsed_ms = (_time.monotonic() - t0) * 1000
             content = result.content if hasattr(result, "content") else str(result)
+            # Extract token usage from response metadata if available
+            usage = getattr(result, "response_metadata", {}).get("token_usage") or {}
+            input_tokens = usage.get("prompt_tokens") or usage.get("input_tokens") or 0
+            output_tokens = usage.get("completion_tokens") or usage.get("output_tokens") or 0
+            from app.config import settings as _settings
+            record_tokens(
+                int(project_id), "modules", _settings.main_llm_model,
+                input_tokens, output_tokens, calc_cost(input_tokens, output_tokens),
+            )
+            record_latency(int(project_id), "modules", "module_extractor", elapsed_ms)
             # Strip markdown code fences if present
             content = re.sub(r"```(?:json)?\s*", "", content).strip().rstrip("```").strip()
             parsed = json.loads(content)
@@ -1144,14 +1178,19 @@ async def extract_modules_stream(
     )
 
     llm = get_llm()
+    from app.config import settings as _cfg
+    _main_model = _cfg.main_llm_model
 
     async def _generate():
+        import time as _time
+        from app.services.metrics_tracker import calc_cost, record_latency, record_tokens
         yield f'data: {json.dumps({"type": "status", "status": "started"})}\n\n'
 
         buffer = ""
         full_buffer = ""
         seen_ids: set[str] = set()
         modules: list[dict] = []
+        t0 = _time.monotonic()
 
         try:
             if sections_text:
@@ -1201,6 +1240,15 @@ async def extract_modules_stream(
                 except Exception:
                     pass
 
+            elapsed_ms = (_time.monotonic() - t0) * 1000
+            # Estimate tokens from full_buffer length (4 chars ≈ 1 token)
+            est_output = max(1, len(full_buffer) // 4)
+            est_input = max(1, len(prompt) // 4)
+            record_tokens(
+                int(project_id), "modules", _main_model,
+                est_input, est_output, calc_cost(est_input, est_output),
+            )
+            record_latency(int(project_id), "modules", "module_extractor", elapsed_ms)
             yield f'data: {json.dumps({"type": "done", "modules": modules, "count": len(modules)})}\n\n'
         finally:
             project.modules_json = json.dumps(modules)
@@ -1689,7 +1737,11 @@ async def suggest_team(
     # A cached result with technologies=[] means AI ran with empty tech stack —
     # don't trust it; re-run with the correct data.
     cached = project.team_suggestion or {}
-    has_valid_cache = bool(cached.get("technologies")) and project.phase in _POST_TEAM_PHASES
+    has_valid_cache = (
+        bool(cached.get("technologies")) and
+        bool(cached.get("members")) and  # empty members = prior bug run, re-run
+        project.phase in _POST_TEAM_PHASES
+    )
     if has_valid_cache:
         members = cached.get("members", [])
         return TeamResponse(members=members, total=len(members))

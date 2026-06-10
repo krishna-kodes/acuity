@@ -4,7 +4,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 TEMPLATE_VERSION = "1.0"
 
@@ -64,17 +64,20 @@ class SectionStatus(str, Enum):
 
 
 class RiskItem(BaseModel):
+    model_config = ConfigDict(extra="ignore")
     risk: str
     mitigation: str
 
 
 class PersonaItem(BaseModel):
+    model_config = ConfigDict(extra="ignore")
     name: str
     role: str
     needs: str
 
 
 class FeatureItem(BaseModel):
+    model_config = ConfigDict(extra="ignore")
     title: str
     description: str
     in_scope: bool

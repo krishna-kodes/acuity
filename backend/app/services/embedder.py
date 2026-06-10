@@ -31,6 +31,15 @@ def collection_exists(project_id: str) -> bool:
     return client.get_collection(collection_name).count() > 0
 
 
+def delete_collection(project_id: str) -> None:
+    client = chromadb.PersistentClient(path=settings.chroma_persist_path)
+    collection_name = f"project_{project_id}"
+    try:
+        client.delete_collection(collection_name)
+    except Exception:
+        pass
+
+
 async def embed_and_store(chunks: list[Chunk]) -> int:
     if not chunks:
         return 0

@@ -16,7 +16,6 @@ import {
   approveProposal,
   regenerateSection,
   getProposalExportUrl,
-  getProject,
   getChatHistory,
 } from "@/lib/api";
 import type { ProposalData, StructuredSection, SectionStatus, RiskItem, PersonaItem, FeatureItem } from "@/lib/api";
@@ -176,20 +175,7 @@ function ProposalAccordion({
 
 // ── Chat page ─────────────────────────────────────────────────────────────────
 
-function makeWelcomeMessage(tbdCount: number): ChatMessage {
-  const now = new Date();
-  const timestamp = now.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
-  const tbdLine =
-    tbdCount === 0
-      ? "No open items need clarification — feel free to ask questions or generate the proposal directly."
-      : `I found ${tbdCount} item${tbdCount === 1 ? "" : "s"} that need clarification before I can generate a complete proposal. You can ask me anything about the document, or work through the TBD items on the right.`;
-  return {
-    id: "welcome",
-    role: "ai",
-    text: `I've processed your requirements document and anonymized the PII. ${tbdLine}`,
-    timestamp,
-  };
-}
+const AUTO_PROMPT = "Summarise this project in 2–3 lines, then list any TBD or unclear items that need clarification.";
 
 const TBD_LEVEL_LABELS: Record<number, TBDItem["level"]> = {
   1: "Explicit TBD",
@@ -203,7 +189,7 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
   const { id: projectId } = use(params);
   const router = useRouter();
   const queryClient = useQueryClient();
-  const [messages, setMessages]     = useState<ChatMessage[]>([makeWelcomeMessage(0)]);
+  const [messages, setMessages]     = useState<ChatMessage[]>([]);
   const [localStatuses, setLocalStatuses] = useState<Record<string, TBDAction>>({});
   const [input, setInput]           = useState("");
   const [isLoading, setIsLoading]   = useState(false);
@@ -211,6 +197,7 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
   const textareaRef  = useRef<HTMLTextAreaElement>(null);
   const bottomRef    = useRef<HTMLDivElement>(null);
   const sendingRef   = useRef(false);
+  const autoSentRef  = useRef(false);
 
   // Proposal preview state
   const [proposalData, setProposalData] = useState<ProposalData | null>(null);
@@ -245,38 +232,8 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
   const outstandingTbds = tbdItems.filter((t) => t.status === "open").length;
   const allTbdsResolved = !tbdsPending && (tbdItems.length === 0 || outstandingTbds === 0);
 
-  // Update welcome message once TBD count is known
-  useEffect(() => {
-    if (remoteTbds === undefined) return;
-    setMessages((prev) => {
-      if (prev[0]?.id !== "welcome") return prev;
-      return [makeWelcomeMessage(remoteTbds.length), ...prev.slice(1)];
-    });
-  }, [remoteTbds]);
-
-  // Fetch project summary and insert as second message (after welcome)
-  useEffect(() => {
-    let cancelled = false;
-    getProject(projectId)
-      .then((project) => {
-        if (cancelled || !project.summary) return;
-        setMessages((prev) => {
-          if (prev.some((m) => m.id === "summary")) return prev;
-          const summaryMsg: ChatMessage = {
-            id: "summary",
-            role: "ai",
-            text: `**Project snapshot:** ${project.summary}`,
-          };
-          return [prev[0], summaryMsg, ...prev.slice(1)];
-        });
-      })
-      .catch(() => {});
-    return () => { cancelled = true; };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId]);
-
   // Hydrate persisted chat history from backend
-  const { data: chatHistory } = useQuery({
+  const { data: chatHistory, isSuccess: chatHistoryLoaded } = useQuery({
     queryKey: ["chat-history", projectId],
     queryFn: () => getChatHistory(projectId),
     staleTime: Infinity,
@@ -286,18 +243,77 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
   useEffect(() => {
     if (!chatHistory || chatHistory.length === 0) return;
     const ts = new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
-    const hydrated: ChatMessage[] = chatHistory.map((m, i) => ({
-      id: `history-${i}`,
-      role: m.role === "user" ? ("pm" as const) : ("ai" as const),
-      text: m.content,
-      timestamp: ts,
+    setMessages(prev => chatHistory.map((m, i) => {
+      const role = m.role === "user" ? ("pm" as const) : ("ai" as const);
+      const existing = prev.find(p => p.role === role && p.text === m.content);
+      return {
+        id: `history-${i}`,
+        role,
+        text: m.content,
+        timestamp: ts,
+        confidenceScore: existing?.confidenceScore,
+        groundednessWarning: existing?.groundednessWarning,
+      };
     }));
-    setMessages((prev) => {
-      const synthetic = prev.filter((m) => m.id === "welcome" || m.id === "summary");
-      return [...synthetic, ...hydrated];
-    });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chatHistory]);
+
+  // Auto-send opening summary prompt for new sessions
+  useEffect(() => {
+    if (!chatHistoryLoaded) return;
+    if (chatHistory && chatHistory.length > 0) return;
+    if (autoSentRef.current) return;
+    autoSentRef.current = true;
+
+    const aiId = "auto-welcome";
+    const ts = new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
+    setMessages([{ id: aiId, role: "ai", text: "", timestamp: ts }]);
+    setIsLoading(true);
+
+    const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+    fetch(`${apiBase}/api/v1/projects/${projectId}/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: AUTO_PROMPT, proceed: false }),
+    }).then(async (response) => {
+      if (!response.ok || !response.body) return;
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let accumulated = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          try {
+            const event = JSON.parse(line.slice(6)) as { type: string; content?: string };
+            if (event.type === "token" && event.content) {
+              accumulated += event.content;
+              setMessages((prev) =>
+                prev.map((m) => m.id === aiId ? { ...m, text: accumulated } : m)
+              );
+            } else if (event.type === "tbds") {
+              queryClient.invalidateQueries({ queryKey: ["tbds", projectId] });
+            } else if (event.type === "done") {
+              queryClient.invalidateQueries({ queryKey: ["chat-history", projectId] });
+              break;
+            }
+          } catch { /* skip malformed lines */ }
+        }
+      }
+    }).catch(() => {
+      setMessages((prev) =>
+        prev.map((m) => m.id === aiId ? { ...m, text: "Couldn't load project summary. Ask me anything about the document." } : m)
+      );
+    }).finally(() => {
+      setIsLoading(false);
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chatHistoryLoaded]);
 
   // Auto-scroll on new messages
   useEffect(() => {
@@ -343,7 +359,11 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
       }
     );
 
-    if (!response.ok || !response.body) {
+    if (!response.ok) {
+      const errBody = await response.json().catch(() => null);
+      throw new Error(errBody?.detail ?? `HTTP ${response.status}`);
+    }
+    if (!response.body) {
       throw new Error(`HTTP ${response.status}`);
     }
 
@@ -410,11 +430,14 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
       }
     }
   } catch (err) {
-    // On error, update the placeholder message with an error note
+    const errMsg = err instanceof Error ? err.message : null;
+    const displayText = errMsg && !errMsg.startsWith("HTTP ")
+      ? errMsg
+      : "Sorry, I couldn't get a response. Please try again.";
     setMessages((prev) =>
       prev.map((m) =>
         m.id === aiId
-          ? { ...m, text: "Sorry, I couldn't get a response. Please try again." }
+          ? { ...m, text: displayText }
           : m
       )
     );
@@ -424,9 +447,15 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
   }
   }
 
+  const TBD_ACTION_TO_API: Record<TBDAction, string> = {
+    answered: "Answer",
+    tbd: "TBD",
+    oos: "Out-of-Scope",
+  };
+
   function handleTBDAction(id: string, action: TBDAction) {
     setLocalStatuses((prev) => ({ ...prev, [id]: action }));
-    submitClarification(projectId, id, action).catch(() => {
+    submitClarification(projectId, id, TBD_ACTION_TO_API[action]).catch(() => {
       // Fire-and-forget; local state already updated
     });
   }
@@ -440,7 +469,7 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
       return { ...prev, ...updates };
     });
     Promise.allSettled(
-      openItems.map((t) => submitClarification(projectId, t.id, action))
+      openItems.map((t) => submitClarification(projectId, t.id, TBD_ACTION_TO_API[action]))
     ).catch(() => {});
   }
 
