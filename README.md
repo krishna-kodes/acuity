@@ -175,16 +175,6 @@ acuity/
 └── docs/                        Architecture, design handoff, design HTML
 ```
 
-Key docs:
-- `CLAUDE.md` — full architecture, non-negotiable rules, env var reference
-- `CONTRIBUTING.md` — branch strategy, pre/post task checklists
-- `EPICS_TASKS.md` — implementation plan (Epics 0–6)
-- `DESIGN_HANDOFF.md` — UI design file, screen inventory, implementation status
-- `TESTING.md` — acceptance criteria and AI engineering metrics coverage
-- `BACKEND_GAPS.md` — endpoint audit log
-- `.env.example` — all environment variables
-
----
 
 ## Tech stack
 
@@ -208,56 +198,6 @@ Key docs:
 ---
 
 ## API surface (all routes prefixed `/api/v1/`)
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/projects` | List all projects |
-| POST | `/projects` | Create project |
-| GET | `/projects/{id}` | Project detail |
-| PATCH | `/projects/{id}/archive` | Archive project |
-| PATCH | `/projects/{id}/unarchive` | Unarchive project |
-| GET | `/projects/{id}/live-status` | Current phase status (poll) |
-| GET | `/projects/{id}/live-status/stream` | Phase status SSE stream |
-| POST | `/projects/{id}/documents` | Upload requirements document |
-| GET | `/projects/{id}/document-status` | Poll document ingestion status |
-| GET | `/projects/{id}/documents/{doc_id}/download` | Download original document |
-| DELETE | `/projects/{id}/documents/{doc_id}` | Delete document |
-| GET | `/projects/{id}/redaction-decisions` | Fetch PII detections |
-| PATCH | `/projects/{id}/redaction-decisions` | Submit redaction decisions |
-| POST | `/projects/{id}/pii-llm-filter` | LLM quality filter for NER false positives |
-| POST | `/projects/{id}/chat` | RAG chat turn (SSE streaming) |
-| GET | `/projects/{id}/tbds` | Fetch detected TBD items |
-| POST | `/projects/{id}/clarifications` | Submit TBD clarification answers |
-| POST | `/projects/{id}/proposal` | Generate proposal |
-| POST | `/projects/{id}/proposal/stream` | Generate proposal (SSE) |
-| GET | `/projects/{id}/proposal` | Retrieve latest proposal |
-| POST | `/projects/{id}/proposal/retry` | Regenerate proposal with PM feedback |
-| POST | `/projects/{id}/proposal/retry/stream` | Regenerate proposal (SSE) |
-| POST | `/projects/{id}/proposal/approve` | Approve proposal → advance to Modules |
-| DELETE | `/projects/{id}/proposals/{proposal_id}` | Delete a proposal version |
-| GET | `/projects/{id}/export/proposal` | Download proposal as DOCX |
-| GET | `/projects/{id}/export/estimate` | Download estimation as DOCX |
-| POST | `/projects/{id}/modules` | LLM-extract work modules from proposal |
-| POST | `/projects/{id}/modules/stream` | Extract modules (SSE) |
-| GET | `/projects/{id}/modules` | Retrieve stored modules |
-| PATCH | `/projects/{id}/modules` | Save PM edits to modules |
-| POST | `/projects/{id}/modules/approve` | Approve modules → advance to Tech Stack |
-| GET | `/projects/{id}/stack` | Get cached tech stack (204 if not generated) |
-| POST | `/projects/{id}/stack` | AI tech stack suggestion |
-| POST | `/projects/{id}/stack/stream` | Tech stack suggestion (SSE) |
-| POST | `/projects/{id}/team` | AI team suggestion |
-| PUT | `/projects/{id}/team` | Save confirmed team |
-| POST | `/projects/{id}/estimate` | Run effort estimation |
-| POST | `/projects/{id}/estimate/stream` | Effort estimation (SSE) |
-| POST | `/projects/{id}/epics` | Generate epics + tasks |
-| POST | `/projects/{id}/epics/stream` | Generate epics + tasks (SSE) |
-| GET | `/projects/{id}/epics` | Retrieve stored epics with sync status |
-| POST | `/projects/{id}/sync` | Sync epics/tasks to GitHub or Jira |
-| GET | `/projects/{id}/sync-config` | Retrieve sync provider config |
-| PATCH | `/projects/{id}/sync-config` | Update sync provider (per-project override) |
-| GET | `/projects/{id}/metrics` | Project observability metrics |
-| POST | `/factory/seed-all` | Seed all demo data |
-| DELETE | `/factory/reset-db` | Reset database |
 
 OpenAPI docs at `http://localhost:8000/docs` when server is running.
 
@@ -311,8 +251,4 @@ EVAL_MODE=real python eval_suite.py --threshold 0.90
 
 Primary eval metric: `pass@1`. CI gate threshold: 90%.
 
----
 
-## Contributing
-
-See `CONTRIBUTING.md` for the full workflow including branch naming, pre/post task checklists, and PR guidelines.
