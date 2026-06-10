@@ -126,16 +126,18 @@ function ProjectRow({ project, isArchived, onArchive, onUnarchive }: {
       {/* DOMAIN col */}
       <div className="flex-1 min-w-0 hidden sm:block">
         <span className="text-sm text-text-secondary truncate">{project.domain ?? "—"}</span>
-        {/* Tech stack pills */}
         {project.tech_preview && project.tech_preview.length > 0 && (
           <div className="flex flex-wrap gap-1 mt-0.5">
-            {project.tech_preview.slice(0, 3).map((t) => (
-              <span key={t} className="text-[10px] bg-surface-subtle border border-border rounded px-1.5 py-0.5 text-text-secondary">
-                {t}
-              </span>
-            ))}
-            {project.tech_preview.length > 3 && (
-              <span className="text-[10px] text-text-muted">+{project.tech_preview.length - 3}</span>
+            {project.tech_preview.slice(0, 4).map((t) => {
+              const name = t.split(/\s*[\s(]/)[0];
+              return (
+                <span key={t} className="text-[10px] bg-surface-subtle border border-border rounded px-1.5 py-0.5 text-text-secondary">
+                  {name}
+                </span>
+              );
+            })}
+            {project.tech_preview.length > 4 && (
+              <span className="text-[10px] text-text-muted">+{project.tech_preview.length - 4}</span>
             )}
           </div>
         )}

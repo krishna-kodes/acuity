@@ -161,7 +161,8 @@ export default function TeamPage({ params }: { params: Promise<{ id: string }> }
 
   const filteredEmployees = allEmployees?.filter(
     (e) =>
-      e.name.toLowerCase().includes(search.toLowerCase()) &&
+      (e.name.toLowerCase().includes(search.toLowerCase()) ||
+        e.skills.some((s) => s.name.toLowerCase().includes(search.toLowerCase()))) &&
       !candidates.some((m) => m.id === e.id) &&
       !manualAdds.some((m) => m.id === e.id)
   );
@@ -281,7 +282,7 @@ export default function TeamPage({ params }: { params: Promise<{ id: string }> }
           </h3>
           <input
             type="text"
-            placeholder="Search employees by name…"
+            placeholder="Search by name or skill…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="w-full px-3 py-2 text-sm bg-card border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-accent/30 text-foreground placeholder:text-text-muted"
