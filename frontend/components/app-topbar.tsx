@@ -23,7 +23,7 @@ function deriveTitle(pathname: string): string {
   for (const [suffix, label] of Object.entries(PATH_TITLES)) {
     if (pathname.endsWith(suffix)) return label;
   }
-  return "Cohort PM";
+  return "";
 }
 
 interface AppTopbarProps {
