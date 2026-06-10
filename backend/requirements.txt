@@ -23,8 +23,11 @@ langchain-google-genai==4.2.4
 langchain-openai==1.2.2
 cryptography==48.0.0
 aiosqlite==0.22.1
+# fastmcp uses starlette 1.x internally but we pin starlette below to keep
+# FastAPI 0.111.0 happy — tools are called directly, not via MCP transport.
 fastmcp==3.4.2
 mcp==1.27.2
+starlette==0.37.2
 spacy>=3.7.0
 faker>=25.0.0
 rank-bm25==0.2.2
