@@ -505,25 +505,3 @@ Add to `.gitignore`: `.env`, `chroma_db/`, `project_state.db`, `app.db`, `docume
 
 ---
 
-## Open Decisions
-
-| Item | Status |
-|------|--------|
-| Observability provider | Both LangSmith and Langfuse configured via env — decision pending |
-| Google Drive source documents folder path | Not yet recorded — ask Krishna |
-| DOCX export versioning (v1, v2) | Not yet specified |
-
----
-
-## Promoted to MVP (June 2026)
-
-Previously post-MVP; now in-scope. GitHub milestones created.
-
-| Item | Milestone | Issues |
-|------|-----------|--------|
-| TBD Detection Level 3 — missing sections | #8 | #90–#93 |
-| TBD Detection Level 4 — contradictions | #9 | #94–#97 |
-| GitHub Projects V2 GraphQL (`GITHUB_USE_PROJECTS_V2=true`) | #10 | #98–#101 |
-| Generic Sync Provider — Jira + GitHub abstraction (`sync_factory.py`) | #11 | #102–#108 |
-
-For Jira sync: use `atlassian-python-api` (not `mcp-atlassian` — subprocess-only, not importable). Wrap in `backend/app/mcp/jira_server.py` FastMCP server. Provider resolved at runtime via `backend/app/services/sync_factory.py`. Rule 10 ("GitHub MCP only") is superseded — both GitHub and Jira sync are now in-scope.
