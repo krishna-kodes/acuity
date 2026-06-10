@@ -15,6 +15,7 @@ interface TeamMember {
   name: string;
   seniority: string;
   availability_pct: number;
+  effectiveAvailability: number;
   skills: string[];
   matchScore: number;
   active_projects_count: number;
@@ -116,10 +117,20 @@ function CandidateCard({ member, selected, onToggle }: CandidateCardProps) {
       {/* Availability */}
       <div className="mb-3">
         <div className="flex items-center justify-between mb-1">
-          <span className="text-[11px] text-text-muted">Availability</span>
-          <span className="text-[11px] font-semibold tabular-nums text-foreground">{member.availability_pct}%</span>
+          <span className="text-[11px] text-text-muted">
+            Availability
+            {member.effectiveAvailability !== member.availability_pct && (
+              <span className="ml-1 text-text-muted line-through tabular-nums">{member.availability_pct}%</span>
+            )}
+          </span>
+          <span className={cn(
+            "text-[11px] font-semibold tabular-nums",
+            member.effectiveAvailability !== member.availability_pct ? "text-warning" : "text-foreground"
+          )}>
+            {member.effectiveAvailability}%
+          </span>
         </div>
-        <AvailabilityBar pct={member.availability_pct} />
+        <AvailabilityBar pct={member.effectiveAvailability} />
       </div>
 
       {/* Skills */}
@@ -142,6 +153,35 @@ function CandidateCard({ member, selected, onToggle }: CandidateCardProps) {
   );
 }
 
+type SortKey = "matchScore" | "effectiveAvailability" | "active_projects_count";
+type SortDir = "asc" | "desc";
+interface SortEntry { key: SortKey; dir: SortDir }
+
+const SORT_LABELS: Record<SortKey, string> = {
+  matchScore: "Match",
+  effectiveAvailability: "Availability",
+  active_projects_count: "Active projects",
+};
+
+const SORT_DEFAULT_DIR: Record<SortKey, SortDir> = {
+  matchScore: "desc",
+  effectiveAvailability: "desc",
+  active_projects_count: "asc",
+};
+
+function applySorts(members: TeamMember[], sorts: SortEntry[]): TeamMember[] {
+  if (!sorts.length) return members;
+  return [...members].sort((a, b) => {
+    for (const { key, dir } of sorts) {
+      const av = a[key] as number;
+      const bv = b[key] as number;
+      if (av === bv) continue;
+      return dir === "desc" ? bv - av : av - bv;
+    }
+    return 0;
+  });
+}
+
 export default function TeamPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const router = useRouter();
@@ -152,6 +192,18 @@ export default function TeamPage({ params }: { params: Promise<{ id: string }> }
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [manualAdds, setManualAdds] = useState<TeamMember[]>([]);
   const [search, setSearch] = useState("");
+  const [sorts, setSorts] = useState<SortEntry[]>([{ key: "matchScore", dir: "desc" }]);
+
+  function toggleSort(key: SortKey) {
+    setSorts((prev) => {
+      const idx = prev.findIndex((s) => s.key === key);
+      const defaultDir = SORT_DEFAULT_DIR[key];
+      const altDir: SortDir = defaultDir === "desc" ? "asc" : "desc";
+      if (idx === -1) return [...prev, { key, dir: defaultDir }];
+      if (prev[idx].dir === defaultDir) return prev.map((s, i) => i === idx ? { ...s, dir: altDir } : s);
+      return prev.filter((_, i) => i !== idx);
+    });
+  }
 
   const { data: allEmployees } = useQuery({
     queryKey: ["admin-employees"],
@@ -172,15 +224,19 @@ export default function TeamPage({ params }: { params: Promise<{ id: string }> }
     triggerTeam(id)
       .then((data) => {
         if (cancelled) return;
-        const members: TeamMember[] = data.members.map((m) => ({
-          id: m.id,
-          name: m.name,
-          seniority: m.seniority,
-          availability_pct: m.availability_pct,
-          skills: m.skills,
-          matchScore: m.match_score ?? 0,
-          active_projects_count: m.active_projects_count ?? 0,
-        }));
+        const members: TeamMember[] = data.members.map((m) => {
+          const active = m.active_projects_count ?? 0;
+          return {
+            id: m.id,
+            name: m.name,
+            seniority: m.seniority,
+            availability_pct: m.availability_pct,
+            effectiveAvailability: Math.max(0, m.availability_pct - active * 20),
+            skills: m.skills,
+            matchScore: m.match_score ?? 0,
+            active_projects_count: active,
+          };
+        });
         setCandidates(members);
       })
       .catch((err: Error) => {
@@ -257,6 +313,52 @@ export default function TeamPage({ params }: { params: Promise<{ id: string }> }
           </p>
         </div>
 
+        {/* Sort controls */}
+        {candidates.length > 0 && (
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-[11px] text-text-muted font-medium">Sort:</span>
+            {(["matchScore", "effectiveAvailability", "active_projects_count"] as SortKey[]).map((key) => {
+              const sortIdx = sorts.findIndex((s) => s.key === key);
+              const active = sortIdx !== -1;
+              const dir = active ? sorts[sortIdx].dir : null;
+              return (
+                <button
+                  key={key}
+                  onClick={() => toggleSort(key)}
+                  className={cn(
+                    "inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-medium border transition-colors",
+                    active
+                      ? "bg-primary text-primary-foreground border-primary"
+                      : "bg-surface-subtle text-text-secondary border-border hover:border-accent"
+                  )}
+                >
+                  {active && (
+                    <span className="w-4 h-4 rounded-full bg-white/20 flex items-center justify-center text-[9px] font-bold shrink-0">
+                      {sortIdx + 1}
+                    </span>
+                  )}
+                  {SORT_LABELS[key]}
+                  {dir && (
+                    <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 10 10" stroke="currentColor" strokeWidth={2}>
+                      {dir === "desc"
+                        ? <path d="M2 3l3 4 3-4" strokeLinecap="round" strokeLinejoin="round" />
+                        : <path d="M2 7l3-4 3 4" strokeLinecap="round" strokeLinejoin="round" />}
+                    </svg>
+                  )}
+                </button>
+              );
+            })}
+            {sorts.length > 0 && !(sorts.length === 1 && sorts[0].key === "matchScore" && sorts[0].dir === "desc") && (
+              <button
+                onClick={() => setSorts([{ key: "matchScore", dir: "desc" }])}
+                className="text-[11px] text-text-muted hover:text-foreground transition-colors px-1"
+              >
+                Reset
+              </button>
+            )}
+          </div>
+        )}
+
         {/* Candidate grid */}
         {candidates.length === 0 ? (
           <div className="py-12 text-center text-sm text-text-muted">
@@ -264,7 +366,7 @@ export default function TeamPage({ params }: { params: Promise<{ id: string }> }
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {candidates.map((member) => (
+            {applySorts(candidates, sorts).map((member) => (
               <CandidateCard
                 key={member.id}
                 member={member}
@@ -316,6 +418,7 @@ export default function TeamPage({ params }: { params: Promise<{ id: string }> }
                           name: emp.name,
                           seniority: emp.seniority,
                           availability_pct: emp.availability_pct,
+                          effectiveAvailability: emp.availability_pct,
                           skills: emp.skills.map((s) => s.name),
                           matchScore: 0,
                           active_projects_count: 0,
