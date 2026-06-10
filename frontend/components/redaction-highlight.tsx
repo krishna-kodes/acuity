@@ -27,15 +27,15 @@ interface RedactionHighlightProps {
 }
 
 const TYPE_COLOR: Record<string, string> = {
-  Email:        "bg-warning-subtle text-warning border-warning/30",
-  Phone:        "bg-warning-subtle text-warning border-warning/30",
-  Person:       "bg-destructive-subtle text-destructive border-destructive/30",
-  Organization: "bg-destructive-subtle text-destructive border-destructive/30",
-  "Credit Card":"bg-destructive-subtle text-destructive border-destructive/30",
-  Location:     "bg-accent-subtle text-accent-foreground border-accent/30",
-  URL:          "bg-warning-subtle text-warning border-warning/30",
-  Currency:     "bg-surface-subtle text-text-secondary border-border",
-  Date:         "bg-surface-subtle text-text-secondary border-border",
+  Email:         "bg-warning-subtle text-warning border-warning/30",
+  Phone:         "bg-warning-subtle text-warning border-warning/30",
+  Person:        "bg-destructive-subtle text-destructive border-destructive/30",
+  Organization:  "bg-destructive-subtle text-destructive border-destructive/30",
+  "Credit Card": "bg-destructive-subtle text-destructive border-destructive/30",
+  Location:      "bg-accent-subtle text-accent-foreground border-accent/30",
+  URL:           "bg-warning-subtle text-warning border-warning/30",
+  Currency:      "bg-surface-subtle text-text-secondary border-border",
+  Date:          "bg-surface-subtle text-text-secondary border-border",
 };
 
 function ConfidenceBadge({ score }: { score: number }) {
@@ -76,7 +76,6 @@ function RedactionRow({
         selected && !isConfirmed && !isOverridden && "bg-accent-subtle/20"
       )}
     >
-      {/* Checkbox */}
       <input
         type="checkbox"
         checked={selected}
@@ -85,7 +84,6 @@ function RedactionRow({
         aria-label={`Select ${span.original}`}
       />
 
-      {/* PII value */}
       <div className="flex-1 min-w-0 flex items-center gap-2">
         <span
           className={cn(
@@ -99,16 +97,11 @@ function RedactionRow({
         <span className="text-[11px] font-mono text-text-secondary">{span.placeholder}</span>
       </div>
 
-      {/* Meta */}
       <div className="hidden sm:flex items-center gap-2 shrink-0">
-        <span className="text-[10px] text-text-muted bg-surface-subtle border border-border px-1.5 py-0.5 rounded">
-          {span.type}
-        </span>
         <span className="text-[10px] text-text-muted">{span.method}</span>
         <ConfidenceBadge score={span.confidence} />
       </div>
 
-      {/* Actions */}
       <div className="flex items-center gap-1.5 shrink-0">
         {isConfirmed ? (
           <span className="text-xs text-success font-medium flex items-center gap-1">
@@ -154,6 +147,105 @@ function RedactionRow({
   );
 }
 
+function GroupSection({
+  type,
+  spans,
+  selected,
+  onSelectGroup,
+  onSelect,
+  onConfirm,
+  onOverride,
+  onUndo,
+  onConfirmGroup,
+}: {
+  type: string;
+  spans: RedactionSpan[];
+  selected: Set<number>;
+  onSelectGroup: (ids: number[], selectAll: boolean) => void;
+  onSelect: (id: number) => void;
+  onConfirm?: (id: number) => void;
+  onOverride?: (id: number) => void;
+  onUndo?: (id: number) => void;
+  onConfirmGroup: (ids: number[]) => void;
+}) {
+  const [expanded, setExpanded] = useState(true);
+  const pendingIds = spans.filter((s) => !s.decision).map((s) => s.id);
+  const redactedCount = spans.filter((s) => s.decision === "confirmed").length;
+  const keptCount = spans.filter((s) => s.decision === "override").length;
+  const pendingCount = pendingIds.length;
+  const allPendingSelected =
+    pendingIds.length > 0 && pendingIds.every((id) => selected.has(id));
+
+  return (
+    <div>
+      {/* Group header */}
+      <div
+        className="flex items-center justify-between px-3.5 py-2 bg-surface-subtle/70 border-b border-border sticky top-0 z-10 cursor-pointer"
+        onClick={() => setExpanded((v) => !v)}
+      >
+        <div className="flex items-center gap-2.5">
+          {pendingIds.length > 0 ? (
+            <input
+              type="checkbox"
+              checked={allPendingSelected}
+              onChange={() => onSelectGroup(pendingIds, !allPendingSelected)}
+              onClick={(e) => e.stopPropagation()}
+              className="w-3.5 h-3.5 accent-primary cursor-pointer shrink-0"
+              aria-label={`Select all pending ${type}`}
+            />
+          ) : (
+            <span className="w-3.5 h-3.5 shrink-0" />
+          )}
+          <span className="text-[11px] font-semibold text-foreground">{type}</span>
+          <span className="text-[10px] text-text-muted">
+            {spans.length} item{spans.length !== 1 ? "s" : ""}
+          </span>
+          {redactedCount > 0 && (
+            <span className="text-[10px] text-success font-medium">{redactedCount} redacted</span>
+          )}
+          {keptCount > 0 && (
+            <span className="text-[10px] text-text-muted">{keptCount} kept</span>
+          )}
+          {pendingCount > 0 && (
+            <span className="text-[10px] text-warning font-medium">{pendingCount} pending</span>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={(e) => { e.stopPropagation(); setExpanded((v) => !v); }}
+            className="p-0.5"
+            aria-label={expanded ? "Collapse group" : "Expand group"}
+          >
+            <svg className={cn("w-3 h-3 text-text-muted transition-transform", !expanded && "-rotate-90")} fill="none" viewBox="0 0 12 12" stroke="currentColor" strokeWidth={2}>
+              <path d="M2 4l4 4 4-4" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+          {pendingCount > 0 && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onConfirmGroup(pendingIds); }}
+              className="text-[10px] font-medium text-primary hover:text-accent-hover transition-colors"
+            >
+              Redact all
+            </button>
+          )}
+        </div>
+      </div>
+
+      {expanded && spans.map((span) => (
+        <RedactionRow
+          key={span.id}
+          span={span}
+          selected={selected.has(span.id)}
+          onSelect={onSelect}
+          onConfirm={onConfirm}
+          onOverride={onOverride}
+          onUndo={onUndo}
+        />
+      ))}
+    </div>
+  );
+}
+
 export function RedactionHighlight({
   detections,
   onConfirm,
@@ -171,6 +263,20 @@ export function RedactionHighlight({
   const pendingIds = detections.filter((d) => !d.decision).map((d) => d.id);
   const allPendingSelected = pendingIds.length > 0 && pendingIds.every((id) => selected.has(id));
 
+  // Group by type, sort within group by confidence desc, sort groups by max confidence desc
+  const groupMap = detections.reduce<Record<string, RedactionSpan[]>>((acc, d) => {
+    (acc[d.type] ??= []).push(d);
+    return acc;
+  }, {});
+
+  const groups = Object.entries(groupMap)
+    .map(([type, spans]) => ({
+      type,
+      spans: [...spans].sort((a, b) => b.confidence - a.confidence),
+      maxConfidence: Math.max(...spans.map((s) => s.confidence)),
+    }))
+    .sort((a, b) => b.maxConfidence - a.maxConfidence);
+
   function toggleSelect(id: number) {
     setSelected((prev) => {
       const next = new Set(prev);
@@ -180,11 +286,19 @@ export function RedactionHighlight({
   }
 
   function toggleSelectAll() {
-    if (allPendingSelected) {
-      setSelected(new Set());
-    } else {
-      setSelected(new Set(pendingIds));
-    }
+    setSelected(allPendingSelected ? new Set() : new Set(pendingIds));
+  }
+
+  function selectGroup(ids: number[], selectAll: boolean) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (selectAll) {
+        ids.forEach((id) => next.add(id));
+      } else {
+        ids.forEach((id) => next.delete(id));
+      }
+      return next;
+    });
   }
 
   function handleConfirmSelected() {
@@ -199,12 +313,20 @@ export function RedactionHighlight({
     setSelected(new Set());
   }
 
+  function handleConfirmGroup(ids: number[]) {
+    onConfirmSelected?.(ids);
+    setSelected((prev) => {
+      const next = new Set(prev);
+      ids.forEach((id) => next.delete(id));
+      return next;
+    });
+  }
+
   return (
     <div className={cn("flex flex-col", className)}>
-      {/* Header */}
+      {/* Global header */}
       <div className="flex items-center justify-between px-3.5 py-2.5 border-b border-border bg-surface-subtle gap-3 flex-wrap">
         <div className="flex items-center gap-3">
-          {/* Select-all checkbox */}
           {pendingIds.length > 0 && (
             <input
               type="checkbox"
@@ -223,25 +345,22 @@ export function RedactionHighlight({
         </div>
 
         <div className="flex items-center gap-2">
-          {/* Batch actions when items selected */}
           {selected.size > 0 && (
             <>
               <button
                 onClick={handleConfirmSelected}
                 className="text-xs font-medium px-2 py-1 rounded bg-success-subtle text-success border border-success/30 hover:bg-success hover:text-white transition-colors"
               >
-                Redact Selected ({selected.size})
+                Redact selected ({selected.size})
               </button>
               <button
                 onClick={handleOverrideSelected}
                 className="text-xs font-medium px-2 py-1 rounded bg-surface-subtle text-text-secondary border border-border hover:bg-secondary transition-colors"
               >
-                Keep Selected ({selected.size})
+                Keep selected ({selected.size})
               </button>
             </>
           )}
-
-          {/* Redact all — only when no selection active */}
           {selected.size === 0 && onConfirmAll && pending > 0 && (
             <button
               onClick={onConfirmAll}
@@ -253,20 +372,21 @@ export function RedactionHighlight({
         </div>
       </div>
 
-      {/* Rows */}
-      <div className="divide-y-0">
-        {detections.map((span) => (
-          <RedactionRow
-            key={span.id}
-            span={span}
-            selected={selected.has(span.id)}
-            onSelect={toggleSelect}
-            onConfirm={onConfirm}
-            onOverride={onOverride}
-            onUndo={onUndo}
-          />
-        ))}
-      </div>
+      {/* Grouped rows */}
+      {groups.map(({ type, spans }) => (
+        <GroupSection
+          key={type}
+          type={type}
+          spans={spans}
+          selected={selected}
+          onSelectGroup={selectGroup}
+          onSelect={toggleSelect}
+          onConfirm={onConfirm}
+          onOverride={onOverride}
+          onUndo={onUndo}
+          onConfirmGroup={handleConfirmGroup}
+        />
+      ))}
 
       {detections.length === 0 && (
         <div className="flex flex-col items-center py-8 gap-2 text-center">
