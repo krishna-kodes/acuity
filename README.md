@@ -2,8 +2,6 @@
 
 A PM uploads a requirements document (PDF/DOCX), refines it through an AI chat interface, extracts structured work modules, receives team and tech stack suggestions with effort estimates, then syncs generated epics/tasks to GitHub or Jira.
 
-**Project board:** https://github.com/users/krishna-kodes/projects/1
-
 ---
 
 ## Prerequisites
