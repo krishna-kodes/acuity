@@ -263,6 +263,19 @@ export default function EpicsPage({ params }: { params: Promise<{ id: string }> 
   useEffect(() => {
     let cancelled = false;
     async function load() {
+      // Fast path: show cached epics if they exist (avoids React strict-mode
+      // double-fire: cancelled check fires before ref guard, so mount 2 runs cleanly)
+      try {
+        const data = await getEpics(id);
+        if (cancelled) return;
+        if (data.epics && data.epics.length > 0) {
+          setEpics(mapApiEpics(data.epics));
+          setEpicsStatus("done");
+          return;
+        }
+      } catch {
+        if (cancelled) return;
+      }
       if (epicsFiredRef.current) return;
       epicsFiredRef.current = true;
       await runEpicsStream(() => cancelled);

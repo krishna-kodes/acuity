@@ -1586,12 +1586,14 @@ async def suggest_stack_stream(
     llm = get_llm(fast=False)
 
     async def _generate():
+        import time as _t
         yield f'data: {json.dumps({"type": "status", "message": "Analyzing requirements..."})}\n\n'
 
         buffer = ""
         full_buffer = ""
         emitted_keys: set[str] = set()
         tech_stack: dict = {}
+        _t0 = _t.time()
 
         try:
             async for chunk in llm.astream(prompt):
@@ -1644,6 +1646,16 @@ async def suggest_stack_stream(
                     pass
 
             yield f'data: {json.dumps({"type": "done", "stack": tech_stack})}\n\n'
+
+            try:
+                from app.services.metrics_tracker import record_tokens, record_latency, calc_cost
+                from app.config import settings as _settings
+                _in = llm.get_num_tokens(prompt)
+                _out = llm.get_num_tokens(full_buffer)
+                record_tokens(int(project_id), "phase_3", _settings.main_llm_model, _in, _out, calc_cost(_in, _out))
+                record_latency(int(project_id), "phase_3", "suggest_stack_stream", (_t.time() - _t0) * 1000)
+            except Exception:
+                pass
 
         finally:
             if tech_stack:
@@ -1874,6 +1886,8 @@ async def estimate_effort_stream(
         pass
 
     async def _generate():
+        import time as _t
+        _t0 = _t.time()
         yield f'data: {json.dumps({"type": "status", "message": "Fetching historical projects..."})}\n\n'
 
         try:
@@ -1962,6 +1976,16 @@ async def estimate_effort_stream(
 
             yield f'data: {json.dumps({"type": "summary", "total_points": total_points, "total_weeks": total_weeks, "confidence": confidence, "reasoning": reasoning})}\n\n'
             yield f'data: {json.dumps({"type": "done", "epics": epics, "total_points": total_points, "total_weeks": float(total_weeks)})}\n\n'
+
+            try:
+                from app.services.metrics_tracker import record_tokens, record_latency, calc_cost
+                from app.config import settings as _settings
+                _in = llm.get_num_tokens(prompt)
+                _out = llm.get_num_tokens(full_buffer)
+                record_tokens(int(project_id), "phase_5", _settings.fast_llm_model, _in, _out, calc_cost(_in, _out))
+                record_latency(int(project_id), "phase_5", "estimate_effort_stream", (_t.time() - _t0) * 1000)
+            except Exception:
+                pass
 
         finally:
             if epics or total_points:
@@ -2131,6 +2155,8 @@ async def stream_epics(
 
     # ── Fresh generation ────────────────────────────────────────────────────
     async def _generate():
+        import time as _t
+        _t0 = _t.time()
         yield f'data: {json.dumps({"type": "status", "message": "Generating epics and tasks..."})}\n\n'
 
         prompt = (
@@ -2273,6 +2299,16 @@ async def stream_epics(
                 if _proj and _proj.phase == ProjectPhase.estimation:
                     _proj.phase = ProjectPhase.epics
                     _db.commit()
+
+        try:
+            from app.services.metrics_tracker import record_tokens, record_latency, calc_cost
+            from app.config import settings as _settings
+            _in = llm.get_num_tokens(prompt)
+            _out = llm.get_num_tokens(full_buffer)
+            record_tokens(int(project_id), "phase_6", _settings.main_llm_model, _in, _out, calc_cost(_in, _out))
+            record_latency(int(project_id), "phase_6", "stream_epics", (_t.time() - _t0) * 1000)
+        except Exception:
+            pass
 
         yield f'data: {json.dumps({"type": "done", "count": len(epics)})}\n\n'
 
