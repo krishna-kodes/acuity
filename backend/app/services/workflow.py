@@ -295,6 +295,8 @@ async def _chat_turn_node(state: ProjectState) -> dict[str, Any]:
             "gate_message": None,
             "groundedness_reasoning": None,
             "groundedness_unsupported_claims": None,
+            "retrieved_sources": [],
+            "canary_leaked": None,
             "chat_proceed": True,
         }
 
@@ -318,6 +320,7 @@ async def _chat_turn_node(state: ProjectState) -> dict[str, Any]:
             "groundedness_reasoning": None,
             "groundedness_unsupported_claims": None,
             "retrieved_sources": [],
+            "canary_leaked": None,
         }
     chunks = _gate.chunks
 
