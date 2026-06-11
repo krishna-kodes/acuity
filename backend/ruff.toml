@@ -1,8 +1,14 @@
-line-length = 100
+line-length = 120
 target-version = "py311"
 
 exclude = ["alembic/versions/*"]
 
 [lint]
 select = ["E", "F", "I", "UP"]
-ignore = []
+# E501 (line length) is style, not correctness — long prompt strings and SSE
+# payloads dominate the violations; leave width to formatting, lint for bugs.
+ignore = ["E501"]
+
+[lint.per-file-ignores]
+# Tests favour single-letter loop vars and lazy imports after fixtures.
+"tests/*" = ["E741", "E402"]

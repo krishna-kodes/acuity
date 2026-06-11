@@ -4,7 +4,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Regex detection
 # ---------------------------------------------------------------------------
@@ -234,8 +233,9 @@ async def test_detect_and_stage_pii_skips_detection_when_disabled(tmp_path):
 
 def test_get_redaction_decisions_returns_empty_for_unknown_project(tmp_path):
     from fastapi.testclient import TestClient
-    from app.main import app
+
     from app.database import get_db
+    from app.main import app
 
     def override_db():
         mock_db = MagicMock()
@@ -254,8 +254,9 @@ def test_get_redaction_decisions_returns_empty_for_unknown_project(tmp_path):
 
 def test_patch_redaction_decisions_updates_detections(tmp_path):
     from fastapi.testclient import TestClient
-    from app.main import app
+
     from app.database import get_db
+    from app.main import app
     from app.models.pii import PIIDetection
 
     mock_det = MagicMock(spec=PIIDetection)

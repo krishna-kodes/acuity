@@ -12,10 +12,9 @@ confirms or overrides each detection via PATCH /redaction-decisions.
 """
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from app.config import settings
-
 
 # ---------------------------------------------------------------------------
 # Patterns

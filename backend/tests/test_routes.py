@@ -120,8 +120,8 @@ def test_get_stack_returns_200_with_cached_data(client, project_id, db_session):
 
 
 def test_stack_stream_returns_event_stream_cached(client, project_id, db_session):
-    from app.models.project import Project
     from app.models.enums import ProjectPhase
+    from app.models.project import Project
     project = db_session.query(Project).first()
     project.tech_stack = {
         "frontend": ["Next.js"],
@@ -154,8 +154,8 @@ def test_stack_stream_returns_event_stream_cached(client, project_id, db_session
 
 
 def test_stack_stream_returns_409_when_modules_not_done(client, project_id, db_session):
-    from app.models.project import Project
     from app.models.enums import ProjectPhase
+    from app.models.project import Project
     project = db_session.query(Project).first()
     project.phase = ProjectPhase.chat
     db_session.commit()
@@ -169,8 +169,8 @@ def test_stack_stream_returns_409_when_modules_not_done(client, project_id, db_s
 # ---------------------------------------------------------------------------
 
 def test_estimate_stream_returns_409_when_team_not_done(client, project_id, db_session):
-    from app.models.project import Project
     from app.models.enums import ProjectPhase
+    from app.models.project import Project
     project = db_session.query(Project).first()
     project.phase = ProjectPhase.chat
     db_session.commit()
@@ -180,8 +180,9 @@ def test_estimate_stream_returns_409_when_team_not_done(client, project_id, db_s
 
 def test_estimate_stream_replays_cached_events(client, project_id, db_session):
     import json as _json
-    from app.models.project import Project
+
     from app.models.enums import ProjectPhase
+    from app.models.project import Project
     project = db_session.query(Project).first()
     project.phase = ProjectPhase.estimation
     project.effort_estimates = {
@@ -213,8 +214,9 @@ def test_estimate_stream_replays_cached_events(client, project_id, db_session):
 def test_estimate_stream_live_emits_epic_events(client, project_id, db_session):
     import json as _json
     from unittest.mock import MagicMock, patch
-    from app.models.project import Project
+
     from app.models.enums import ProjectPhase
+    from app.models.project import Project
     project = db_session.query(Project).first()
     project.phase = ProjectPhase.team
     project.effort_estimates = None
@@ -252,8 +254,8 @@ def test_estimate_stream_live_emits_epic_events(client, project_id, db_session):
 # ---------------------------------------------------------------------------
 
 def test_epics_stream_returns_409_when_estimation_not_done(client, project_id, db_session):
-    from app.models.project import Project
     from app.models.enums import ProjectPhase
+    from app.models.project import Project
     project = db_session.query(Project).first()
     project.phase = ProjectPhase.chat
     db_session.commit()
@@ -263,8 +265,9 @@ def test_epics_stream_returns_409_when_estimation_not_done(client, project_id, d
 
 def test_epics_stream_replays_cached_events(client, project_id, db_session):
     import json as _json
-    from app.models.project import Project
+
     from app.models.enums import ProjectPhase
+    from app.models.project import Project
     from app.models.sync import Epic, Task
 
     project = db_session.query(Project).first()
@@ -307,8 +310,9 @@ def test_epics_stream_replays_cached_events(client, project_id, db_session):
 def test_epics_stream_live_emits_epic_events(client, project_id, db_session):
     import json as _json
     from unittest.mock import MagicMock, patch
-    from app.models.project import Project
+
     from app.models.enums import ProjectPhase
+    from app.models.project import Project
 
     project = db_session.query(Project).first()
     project.phase = ProjectPhase.estimation

@@ -10,24 +10,32 @@ Usage:
 """
 
 import asyncio
+import json as _json
 from functools import wraps
-from typing import Any, TypedDict
+from typing import TYPE_CHECKING, Any, TypedDict
 
 from langchain_core.tools import tool
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.graph import END, StateGraph
 from langgraph.prebuilt import create_react_agent
-from pydantic import BaseModel
 
-import json as _json
+if TYPE_CHECKING:
+    from langgraph.graph.state import CompiledStateGraph
+from pydantic import BaseModel
 
 # Module-level imports so tests can patch app.services.workflow.<name>
 from app.database import SessionLocal
 from app.models.employee import Employee, EmployeeSkill, Skill
 from app.models.reference import ApprovedTechnology, HistoricalProject
 from app.services.llm_factory import get_llm
+from app.services.metrics_tracker import (
+    calc_cost,
+    record_error,
+    record_latency,
+    record_retrieval,
+    record_tokens,
+)
 from app.services.rag import retrieve
-from app.services.metrics_tracker import calc_cost, record_error, record_latency, record_quality, record_retrieval, record_tokens
 from app.services.tbd_detection import detect_tbds, persist_tbds
 
 # ---------------------------------------------------------------------------
@@ -179,7 +187,6 @@ def get_historical_projects() -> list[dict]:
 @tool
 def estimate_effort(proposal_summary: str, team_size: int, reference_projects: list[dict]) -> dict:
     """Estimate effort in weeks and story points given team and historical data."""
-    from app.schemas.project import EpicsOutput
 
     class _BreakdownItem(BaseModel):
         phase: str
@@ -232,6 +239,7 @@ _EPIC_GENERATION_PROMPT = (
 def generate_epics_tool(proposal_summary: str, tech_stack_summary: str) -> list[dict]:
     """Generate a list of epics and tasks using structured LLM output."""
     from datetime import date
+
     from app.schemas.project import EpicsOutput
 
     llm = get_llm(fast=False).with_structured_output(EpicsOutput)
@@ -337,6 +345,7 @@ async def _chat_turn_node(state: ProjectState) -> dict[str, Any]:
 
     if reranker_scores:
         from sqlalchemy import func as _sqlfunc
+
         from app.models.observability import RetrievalLog as _RetrievalLog
         _rdb = SessionLocal()
         try:
@@ -691,10 +700,11 @@ def suggest_team_direct(tech_stack: dict) -> dict:
     Used by the suggest_team router when phase 3 was run via the streaming
     endpoint (which saves to project.tech_stack but not the LangGraph checkpoint).
     """
-    from sqlalchemy.orm import joinedload as _jl
-    from app.models.project import Project as _Project
-
     import re as _re
+
+    from sqlalchemy.orm import joinedload as _jl
+
+    from app.models.project import Project as _Project
 
     def _extract_name(entry: str) -> str:
         """Strip ' (category): tags' suffix — e.g. 'React (frontend): SPA,...' → 'React'."""

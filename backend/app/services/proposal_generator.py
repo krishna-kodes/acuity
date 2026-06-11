@@ -10,13 +10,13 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
+
     from app.models.project import Project
 
 from app.schemas.proposal_sections import (
@@ -46,6 +46,7 @@ class ProposalContext:
 
 def _get_proposal_llm():
     from langchain_openai import ChatOpenAI
+
     from app.config import settings
 
     return ChatOpenAI(
@@ -176,7 +177,7 @@ async def _fetch_open_questions(ctx: ProposalContext) -> SectionResponse:
     )
 
 
-async def _build_context(project: "Project", db: "Session") -> ProposalContext:
+async def _build_context(project: Project, db: Session) -> ProposalContext:
     from app.models.clarification import Clarification
     from app.models.enums import TBDStatus
     from app.services.rag import retrieve
@@ -230,8 +231,8 @@ async def _build_context(project: "Project", db: "Session") -> ProposalContext:
 
 
 async def generate_structured_proposal(
-    project: "Project",
-    db: "Session",
+    project: Project,
+    db: Session,
     additional_context: str = "",
 ) -> list[SectionResponse]:
     """Generate all 10 proposal sections with fan-out concurrency.
@@ -307,8 +308,8 @@ async def generate_structured_proposal(
 
 
 async def generate_structured_proposal_stream(
-    project: "Project",
-    db: "Session",
+    project: Project,
+    db: Session,
     additional_context: str = "",
 ):
     """Async generator: yields each SectionResponse as it completes.
@@ -358,8 +359,8 @@ async def generate_structured_proposal_stream(
 
 async def generate_single_section(
     section_id: ProposalSectionId,
-    project: "Project",
-    db: "Session",
+    project: Project,
+    db: Session,
     additional_context: str = "",
 ) -> SectionResponse:
     """Regenerate a single section in isolation."""

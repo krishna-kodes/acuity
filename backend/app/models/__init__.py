@@ -1,7 +1,6 @@
 from app.models.base import Base
 from app.models.branding import BrandingSettings
 from app.models.clarification import Clarification
-from app.models.guardrail import GuardrailLog
 from app.models.employee import Employee, EmployeeSkill, Skill
 from app.models.enums import (
     DocumentStatus,
@@ -12,6 +11,7 @@ from app.models.enums import (
     TBDLevel,
     TBDStatus,
 )
+from app.models.guardrail import GuardrailLog
 from app.models.observability import ErrorLog, EvalResult, LatencyLog, Metric, QualityLog, RetrievalLog
 from app.models.pii import PIIDetection, PIIIngestionLog
 from app.models.project import Document, Project, Proposal, ProposalState

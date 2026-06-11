@@ -13,12 +13,10 @@ Patch targets:
     so patching `app.services.github_sync.sync_epics_to_github` intercepts it.
 """
 
-import pytest
 from unittest.mock import AsyncMock, patch
 
-from app.models.sync import Epic, Task
 from app.models.enums import SyncStatus
-
+from app.models.sync import Epic, Task
 
 # ---------------------------------------------------------------------------
 # Mock state returned by run_phase

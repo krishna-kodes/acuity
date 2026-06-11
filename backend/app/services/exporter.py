@@ -126,7 +126,7 @@ def _add_markdown_body(doc, text: str, secondary_hex: str | None = None, primary
         flush_table()
         if not para_lines:
             return
-        combined = " ".join(l for l in para_lines if l.strip())
+        combined = " ".join(ln for ln in para_lines if ln.strip())
         if combined.strip():
             p = doc.add_paragraph()
             _add_formatted_runs(p, combined.strip())
@@ -165,7 +165,7 @@ def _add_markdown_body(doc, text: str, secondary_hex: str | None = None, primary
             else:
                 if para_lines:
                     # flush prose before table starts
-                    combined = " ".join(l for l in para_lines if l.strip())
+                    combined = " ".join(ln for ln in para_lines if ln.strip())
                     if combined.strip():
                         p = doc.add_paragraph()
                         _add_formatted_runs(p, combined.strip())

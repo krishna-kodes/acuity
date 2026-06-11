@@ -3,9 +3,14 @@ import dataclasses
 import json
 import os
 import re
+from datetime import UTC
+from typing import TYPE_CHECKING
 from urllib.parse import quote
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Response, UploadFile
+
+if TYPE_CHECKING:
+    from app.services.exporter import ProposalContent
 from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -28,6 +33,7 @@ from app.schemas.document import (
     RedactionSummaryResponse,
 )
 from app.schemas.metrics import MetricsResponse
+from app.schemas.modules import ModuleOut, ModulePatchRequest, ModulesResponse
 from app.schemas.project import (
     ChatRequest,
     EstimationResponse,
@@ -35,14 +41,13 @@ from app.schemas.project import (
     ProjectDetailResponse,
     ProjectResponse,
     TBDItem,
-    TechStackResponse,
     TeamResponse,
     TeamUpdateRequest,
+    TechStackResponse,
     phase_to_int,
 )
-from app.schemas.modules import ModulePatchRequest, ModulesResponse, ModuleOut
 from app.schemas.proposal import ProposalResponse, ProposalRetryRequest, ProposalSectionOut, RegenerateSectionRequest
-from app.schemas.proposal_sections import ProposalSectionId, SectionResponse, TEMPLATE_VERSION
+from app.schemas.proposal_sections import TEMPLATE_VERSION, ProposalSectionId, SectionResponse
 from app.schemas.sync import SyncConfigRequest, SyncConfigResponse, SyncProvider, SyncRequest, SyncResponse
 from app.services.ingestion import ingest_document
 from app.services.workflow import get_workflow
@@ -173,8 +178,8 @@ def _save_proposal_from_sections(
     structured_sections: list,
 ) -> "Proposal":
     """Persist DOCX + Proposal row from pre-generated sections. Sync — no LLM calls."""
-    from app.services.exporter import generate_proposal_docx
     from app.services.branding import get_branding
+    from app.services.exporter import generate_proposal_docx
 
     sections_json_str = json.dumps([s.model_dump(mode="json") for s in structured_sections])
     generated_text = "\n\n".join(f"## {s.title}\n{s.content}" for s in structured_sections)
@@ -338,9 +343,10 @@ def get_live_status(
     project_id: str,
     db: Session = Depends(get_db),
 ):
-    from datetime import datetime, timezone, timedelta
-    from app.models.observability import Metric, LatencyLog
-    from app.schemas.live_status import LiveStatusResponse, PHASE_AGENT_NAMES
+    from datetime import datetime, timedelta
+
+    from app.models.observability import LatencyLog, Metric
+    from app.schemas.live_status import PHASE_AGENT_NAMES, LiveStatusResponse
 
     _get_project_or_404(project_id, db)
     pid = int(project_id)
@@ -373,10 +379,10 @@ def get_live_status(
         active_phase = latest_metric.phase
         agent = PHASE_AGENT_NAMES.get(latest_metric.phase)
         model = latest_metric.model
-        cutoff = datetime.now(timezone.utc) - timedelta(seconds=120)
+        cutoff = datetime.now(UTC) - timedelta(seconds=120)
         ts = latest_metric.created_at
         if ts.tzinfo is None:
-            ts = ts.replace(tzinfo=timezone.utc)
+            ts = ts.replace(tzinfo=UTC)
         is_recent = ts >= cutoff
 
     return LiveStatusResponse(
@@ -398,10 +404,11 @@ async def live_status_stream(
     project_id: str,
     db: Session = Depends(get_db),
 ):
-    from datetime import datetime, timezone, timedelta
+    from datetime import datetime, timedelta
+
     from app.database import SessionLocal
-    from app.models.observability import Metric, LatencyLog
-    from app.schemas.live_status import LiveStatusResponse, PHASE_AGENT_NAMES
+    from app.models.observability import LatencyLog, Metric
+    from app.schemas.live_status import PHASE_AGENT_NAMES, LiveStatusResponse
 
     _get_project_or_404(project_id, db)
     pid = int(project_id)
@@ -436,10 +443,10 @@ async def live_status_stream(
                 active_phase = latest_metric.phase
                 agent = PHASE_AGENT_NAMES.get(latest_metric.phase)
                 model = latest_metric.model
-                cutoff = datetime.now(timezone.utc) - timedelta(seconds=120)
+                cutoff = datetime.now(UTC) - timedelta(seconds=120)
                 ts = latest_metric.created_at
                 if ts.tzinfo is None:
-                    ts = ts.replace(tzinfo=timezone.utc)
+                    ts = ts.replace(tzinfo=UTC)
                 is_recent = ts >= cutoff
 
             return (
@@ -937,8 +944,9 @@ async def generate_proposal_stream(
     db: Session = Depends(get_db),
 ):
     """SSE stream for initial proposal generation. Same events as retry/stream."""
-    from app.services.proposal_generator import generate_structured_proposal_stream
     from fastapi.responses import StreamingResponse
+
+    from app.services.proposal_generator import generate_structured_proposal_stream
 
     project = _get_project_or_404(project_id, db)
 
@@ -1000,8 +1008,9 @@ async def retry_proposal_stream(
     db: Session = Depends(get_db),
 ):
     """SSE stream: emits each section as generated, then a done event with the full proposal."""
-    from app.services.proposal_generator import generate_structured_proposal_stream
     from fastapi.responses import StreamingResponse
+
+    from app.services.proposal_generator import generate_structured_proposal_stream
 
     project = _get_project_or_404(project_id, db)
 
@@ -1164,6 +1173,7 @@ async def extract_modules(
         )
         try:
             import time as _time
+
             from app.services.llm_factory import get_llm
             from app.services.metrics_tracker import calc_cost, record_latency, record_tokens
             t0 = _time.monotonic()
@@ -1205,6 +1215,7 @@ async def extract_modules_stream(
 ):
     """SSE stream: emits status → module events → done for module extraction."""
     import uuid as _uuid
+
     from app.services.llm_factory import get_llm
 
     project = _get_project_or_404(project_id, db)
@@ -1242,6 +1253,7 @@ async def extract_modules_stream(
 
     async def _generate():
         import time as _time
+
         from app.services.metrics_tracker import calc_cost, record_latency, record_tokens
         yield f'data: {json.dumps({"type": "status", "status": "started"})}\n\n'
 
@@ -1622,8 +1634,8 @@ async def suggest_stack_stream(
     db: Session = Depends(get_db),
 ):
     """SSE stream: emits status → category events → rationale → done for tech stack generation."""
-    from app.services.llm_factory import get_llm
     from app.models.reference import ApprovedTechnology
+    from app.services.llm_factory import get_llm
 
     project = _get_project_or_404(project_id, db)
 
@@ -1755,8 +1767,8 @@ async def suggest_stack_stream(
             yield f'data: {json.dumps({"type": "done", "stack": tech_stack})}\n\n'
 
             try:
-                from app.services.metrics_tracker import record_tokens, record_latency, calc_cost
                 from app.config import settings as _settings
+                from app.services.metrics_tracker import calc_cost, record_latency, record_tokens
                 _in = llm.get_num_tokens(prompt)
                 _out = llm.get_num_tokens(full_buffer)
                 record_tokens(int(project_id), "phase_3", _settings.main_llm_model, _in, _out, calc_cost(_in, _out))
@@ -1920,8 +1932,8 @@ async def estimate_effort_stream(
     db: Session = Depends(get_db),
 ):
     """SSE stream: status → epic events (one per breakdown phase) → summary → done."""
-    from app.services.llm_factory import get_llm
     from app.models.reference import HistoricalProject
+    from app.services.llm_factory import get_llm
 
     project = _get_project_or_404(project_id, db)
 
@@ -2089,8 +2101,8 @@ async def estimate_effort_stream(
             yield f'data: {json.dumps({"type": "done", "epics": epics, "total_points": total_points, "total_weeks": float(total_weeks)})}\n\n'
 
             try:
-                from app.services.metrics_tracker import record_tokens, record_latency, calc_cost
                 from app.config import settings as _settings
+                from app.services.metrics_tracker import calc_cost, record_latency, record_tokens
                 _in = llm.get_num_tokens(prompt)
                 _out = llm.get_num_tokens(full_buffer)
                 record_tokens(int(project_id), "phase_5", _settings.fast_llm_model, _in, _out, calc_cost(_in, _out))
@@ -2189,6 +2201,7 @@ async def stream_epics(
     """
     import json as _json_mod
     from datetime import date
+
     from app.services.llm_factory import get_llm
     from app.services.workflow import _EPIC_GENERATION_PROMPT
 
@@ -2412,8 +2425,8 @@ async def stream_epics(
                     _db.commit()
 
         try:
-            from app.services.metrics_tracker import record_tokens, record_latency, calc_cost
             from app.config import settings as _settings
+            from app.services.metrics_tracker import calc_cost, record_latency, record_tokens
             _in = llm.get_num_tokens(prompt)
             _out = llm.get_num_tokens(full_buffer)
             record_tokens(int(project_id), "phase_6", _settings.main_llm_model, _in, _out, calc_cost(_in, _out))
@@ -2481,7 +2494,7 @@ async def sync(
 ) -> SyncResponse:
     import inspect
     import json as _json_mod
-    from app.config import settings as _settings
+
     from app.models.enums import SyncStatus as DBSyncStatus
     from app.services.sync_factory import get_sync_fn
 
@@ -2662,9 +2675,9 @@ async def chat(
     # Layer 0: prompt injection — regex (fast) then LLM semantic (catches obfuscation/synonyms)
     from app.config import settings as _cfg_inj
     if _cfg_inj.prompt_injection_detection_enabled:
+        from app.guardrails import log_guardrail as _log_guardrail
         from app.guardrails.prompt_injection import classify_llm as _inj_llm
         from app.guardrails.prompt_injection import scan as _inj_scan
-        from app.guardrails import log_guardrail as _log_guardrail
         _inj = _inj_scan(body.message)
         if not _inj.detected:
             _inj = await _inj_llm(body.message, project_id)
@@ -2736,16 +2749,19 @@ def get_metrics(
     db: Session = Depends(get_db),
 ) -> MetricsResponse:
     import statistics
+
     from sqlalchemy import func
 
     from app.models.enums import SyncStatus
-    from app.models.observability import (
-        ErrorLog, EvalResult, LatencyLog, Metric, QualityLog, RetrievalLog
-    )
+    from app.models.observability import ErrorLog, EvalResult, LatencyLog, Metric, QualityLog, RetrievalLog
     from app.models.sync import Epic, Task
     from app.schemas.metrics import (
-        DailyTokenItem, ErrorPhaseItem, LatencyNodeItem,
-        QualityScoreItem, RetrievalQueryItem, TokenPhaseItem,
+        DailyTokenItem,
+        ErrorPhaseItem,
+        LatencyNodeItem,
+        QualityScoreItem,
+        RetrievalQueryItem,
+        TokenPhaseItem,
     )
 
     _get_project_or_404(project_id, db)
