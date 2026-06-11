@@ -53,7 +53,7 @@ class ProjectState(TypedDict):
     gate_message: str | None          # human-readable gate message when status != "pass"
     groundedness_reasoning: str | None
     groundedness_unsupported_claims: list[str] | None
-    retrieved_sources: list  # [{section_hint, page_number}] for last chat turn
+    retrieved_sources: list  # [{chunk_id, chunk_index, section_hint, page_number, text}] for last chat turn
     canary_leaked: bool | None  # Layer 4: True if response contained canary token
 
 
@@ -418,11 +418,27 @@ async def _chat_turn_node(state: ProjectState) -> dict[str, Any]:
     from app.guardrails.output_monitor import evaluate as _om_evaluate
     _om = _om_evaluate(response_content, project_id)
 
-    messages.append({"role": "assistant", "content": response_content, "groundedness_score": groundedness_score})
-    retrieved_sources = [
-        {"section_hint": c.get("section_hint") or "", "page_number": c.get("page_number")}
-        for c in chunks
-    ]
+    # De-dup by chunk_id (sub-queries can surface the same chunk twice).
+    retrieved_sources = []
+    _seen_chunk_ids: set[str] = set()
+    for c in chunks:
+        cid = f'{c.get("project_id")}_{c.get("chunk_index")}'
+        if cid in _seen_chunk_ids:
+            continue
+        _seen_chunk_ids.add(cid)
+        retrieved_sources.append({
+            "chunk_id": cid,
+            "chunk_index": c.get("chunk_index"),
+            "section_hint": c.get("section_hint") or "",
+            "page_number": c.get("page_number"),
+            "text": c.get("text") or "",
+        })
+    messages.append({
+        "role": "assistant",
+        "content": response_content,
+        "groundedness_score": groundedness_score,
+        "sources": retrieved_sources,
+    })
     return {
         "chat_messages": messages,
         "tbd_items": list(state.get("tbd_items") or []) + new_tbds,

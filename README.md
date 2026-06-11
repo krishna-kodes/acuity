@@ -56,7 +56,7 @@ The app guides a PM through 7 sequential phases. Each phase is gated behind the 
 | # | Route | Description |
 |---|-------|-------------|
 | 1 | `/redaction` | PII detection — regex + spaCy NER + LLM quality filter; PM reviews each detection before advancing |
-| 2 | `/chat` | RAG-powered requirements chat; TBD surfacing (all 4 levels); clarification widget; proposal generation with per-section regeneration |
+| 2 | `/chat` | RAG-powered requirements chat with clickable source citations; TBD surfacing (all 4 levels); clarification widget; proposal generation with per-section regeneration |
 | 3 | `/modules` | LLM-extracts work modules from proposal; PM can edit, reorder, and label before approving |
 | 4 | `/techstack` | AI tech stack suggestion from the approved-technology list; streams category-by-category via SSE |
 | 5 | `/team` | AI team suggestion matched to skills and availability; effective availability shown (reduced by active-project load); multi-key sort by match score / availability / active projects |
@@ -80,6 +80,7 @@ Document upload
            ├─ Query rewriting: 3 sub-queries per user turn
            ├─ Guardrails: domain classifier (reject off-topic) + retrieval gate (block low-confidence)
            ├─ TBD detection: Level 1 (explicit) + Level 2 (vague) + Level 3 (missing sections) + Level 4 (contradictions)
+           ├─ Source citations: retrieved chunks (chunk_id, section, page, snippet) streamed as clickable chips → Sources preview panel
            └─ Proposal generation: 10-section fan-out (asyncio.gather), DOCX export
                └─ Phase 3: Work module extraction (LLM-extracted, PM-editable)
                    └─ Phase 4: Tech stack suggestion (approved-technology tool + employee skills)
@@ -94,6 +95,13 @@ Document upload
 2. Sparse — BM25 (`rank-bm25`) over same corpus, top-`TOP_K_RETRIEVAL`
 3. Merge — Reciprocal Rank Fusion (RRF)
 4. Rerank — `cross-encoder/ms-marco-MiniLM-L-6-v2`, top-`TOP_N_RERANK` (default 4) passed to LLM
+
+The reranked chunks are streamed back as the SSE `sources` event (`chunk_id`,
+`chunk_index`, `section_hint`, `page_number`, `text`) and persisted on the
+assistant message. The UI renders them as clickable citation chips under each
+answer; clicking one opens the Sources preview panel and scrolls to / highlights
+the cited chunk. Citations survive page reload (they ride the checkpointer's
+`chat_messages` JSON — no schema change).
 
 ### Guardrails (Phase 2)
 
@@ -185,7 +193,8 @@ acuity/
 │   │   ├── estimation/          Effort estimation
 │   │   ├── epics/               Epic/task review + sync
 │   │   └── metrics/             5-tab observability dashboard
-│   ├── components/              Shared UI (topbar, sidebar, live-status-bar)
+│   ├── components/              Shared UI (topbar, sidebar, live-status-bar,
+│   │                            chat-thread, sources-panel)
 │   └── lib/                     api.ts, project-phases.ts, utils
 ├── backend/
 │   ├── app/

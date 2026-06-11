@@ -8,8 +8,11 @@ import { cn } from "@/lib/utils";
 export type MessageRole = "ai" | "pm";
 
 export interface ChatSource {
+  chunk_id: string;
+  chunk_index?: number | null;
   section_hint: string;
   page_number?: number | null;
+  text?: string;
 }
 
 export interface GroundednessWarning {
@@ -37,6 +40,7 @@ interface ChatThreadProps {
   onRetry?: () => void;
   suggestedReplies?: string[];
   onSuggestionClick?: (text: string) => void;
+  onCitationClick?: (source: ChatSource) => void;
 }
 
 function AIAvatar() {
@@ -108,34 +112,31 @@ function GroundednessWarningBanner({ warning }: { warning: GroundednessWarning }
   );
 }
 
-function SourcesCollapsible({ sources }: { sources: ChatSource[] }) {
-  const [open, setOpen] = useState(false);
+function CitationChips({
+  sources,
+  onCitationClick,
+}: {
+  sources: ChatSource[];
+  onCitationClick?: (source: ChatSource) => void;
+}) {
   return (
-    <div className="mt-1">
-      <button
-        onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-1 text-[11px] text-text-muted hover:text-foreground transition-colors"
-      >
-        <svg
-          className={cn("w-3 h-3 transition-transform", open && "rotate-90")}
-          fill="none" viewBox="0 0 12 12" stroke="currentColor" strokeWidth={2}
+    <div className="mt-1.5 flex flex-wrap gap-1.5">
+      {sources.map((s, i) => (
+        <button
+          key={s.chunk_id || i}
+          onClick={() => onCitationClick?.(s)}
+          title={s.text ? s.text.slice(0, 160) : undefined}
+          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-primary/30 bg-primary/5 text-[11px] text-primary hover:bg-primary/10 transition-colors max-w-[220px]"
         >
-          <path d="M4 2l4 4-4 4" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-        {sources.length} source{sources.length !== 1 ? "s" : ""}
-      </button>
-      {open && (
-        <div className="mt-1.5 space-y-1 pl-3 border-l-2 border-border">
-          {sources.map((s, i) => (
-            <div key={i} className="text-[11px] text-text-muted leading-snug">
-              <span className="text-foreground">{s.section_hint || "Untitled section"}</span>
-              {s.page_number != null && (
-                <span className="ml-1.5 opacity-60">p.{s.page_number}</span>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
+          <svg className="w-2.5 h-2.5 shrink-0" fill="none" viewBox="0 0 12 12" stroke="currentColor" strokeWidth={2}>
+            <path d="M3 3h6v6M9 3L3 9" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          <span className="truncate">{s.section_hint || "Untitled section"}</span>
+          {s.page_number != null && (
+            <span className="opacity-60 shrink-0">p.{s.page_number}</span>
+          )}
+        </button>
+      ))}
     </div>
   );
 }
@@ -144,10 +145,12 @@ function MessageBubble({
   message,
   showRetry,
   onRetry,
+  onCitationClick,
 }: {
   message: ChatMessage;
   showRetry?: boolean;
   onRetry?: () => void;
+  onCitationClick?: (source: ChatSource) => void;
 }) {
   const isAI = message.role === "ai";
 
@@ -207,7 +210,7 @@ function MessageBubble({
           <GroundednessWarningBanner warning={message.groundednessWarning} />
         )}
         {isAI && message.sources && message.sources.length > 0 && (
-          <SourcesCollapsible sources={message.sources} />
+          <CitationChips sources={message.sources} onCitationClick={onCitationClick} />
         )}
         <div className="flex items-center gap-1.5 px-1">
           {message.timestamp && (
@@ -243,6 +246,7 @@ export function ChatThread({
   onRetry,
   suggestedReplies,
   onSuggestionClick,
+  onCitationClick,
 }: ChatThreadProps) {
   return (
     <div className={cn("flex flex-col gap-4 py-4 px-4 overflow-y-auto", className)}>
@@ -268,6 +272,7 @@ export function ChatThread({
             message={message}
             showRetry={showRetry}
             onRetry={onRetry}
+            onCitationClick={onCitationClick}
           />
         );
       })}
