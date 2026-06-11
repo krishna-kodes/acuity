@@ -29,7 +29,91 @@ _REGEX_PATTERNS: dict[str, re.Pattern] = {
     "SSN": re.compile(r"\b\d{3}-\d{2}-\d{4}\b"),
 }
 
-_NER_LABELS: frozenset[str] = frozenset({"PERSON", "ORG", "GPE"})
+def _ner_labels() -> frozenset[str]:
+    """Configurable PII entity labels (env: PII_NER_LABELS)."""
+    return frozenset(
+        lbl.strip().upper() for lbl in settings.pii_ner_labels.split(",") if lbl.strip()
+    )
+
+
+# Tech terms, acronyms, vendors, and platform names that spaCy mislabels as
+# ORG/PERSON but are not personal data. Lowercased for matching.
+_NER_DENYLIST: frozenset[str] = frozenset({
+    # acronyms / formats
+    "api", "sms", "pdf", "csv", "json", "xml", "html", "css", "url", "sdk",
+    "ui", "ux", "os", "ios", "gdpr", "ccpa", "hipaa", "pwa", "saas", "paas",
+    "crm", "erp", "kpi", "mvp", "tbd", "tbc", "faq", "wifi", "qr", "2fa", "sso",
+    "rest", "grpc", "graphql", "jwt", "oauth", "ssl", "tls", "cdn", "dns",
+    # platforms / vendors / products (companies, but not personal PII)
+    "stripe", "paypal", "salesforce", "slack", "zoom", "teams", "zapier",
+    "android", "ios", "apple", "google", "microsoft", "aws", "azure", "gcp",
+    "github", "gitlab", "jira", "linear", "figma", "notion", "twilio",
+    "sendgrid", "mailchimp", "shopify", "stripe", "square", "plaid",
+})
+
+# Common name prefixes where an internal capital is legitimate (McDonald,
+# MacLeod, O'Brien, DeShawn). Protects them from the mid-word-caps garbage filter.
+_NAME_PREFIX_RE = re.compile(r"^(mc|mac|o['’]|de|la|le|van|von|di|da)", re.IGNORECASE)
+# Internal lowercase->uppercase transition (aWendance, OperaJons, menJoned) =
+# broken PDF ligature extraction, not a real entity.
+_MIDWORD_CAPS_RE = re.compile(r"[a-z][A-Z]")
+
+
+def _is_ner_noise(text: str) -> bool:
+    """True when an NER span is almost certainly not personal PII.
+
+    Mechanical false-positive filter (P1). Semantic edge cases are left to
+    the optional LLM quality filter (P2). Conservative: only drops spans with
+    a strong garbage signal.
+    """
+    t = text.strip()
+    if len(t) < 2 or not any(c.isalpha() for c in t):
+        return True
+    low = t.lower()
+    if low in _NER_DENYLIST:
+        return True
+    # All-caps short token → acronym (API, SMS, TX, TBD, GDPR)
+    if t.isupper() and len(t) <= 5:
+        return True
+    # Mid-word caps anomaly → extraction garbage, unless a known name prefix
+    for word in t.split():
+        if _MIDWORD_CAPS_RE.search(word) and not _NAME_PREFIX_RE.match(word):
+            return True
+    return False
+
+
+async def filter_ner_candidates_llm(candidate_texts: list[str], project_id: str | None = None) -> list[str]:
+    """LLM quality gate (P2): return only candidates that are real human or
+    company names. Safe fallback: returns all candidates on any failure.
+    """
+    import json as _json
+    import re as _re
+
+    if not candidate_texts:
+        return []
+    try:
+        from app.services.llm_factory import get_llm
+
+        llm = get_llm()
+        prompt = (
+            "You are a PII detection validator. These text spans were flagged by an NER model "
+            "as possibly containing person names or organization names. Many are false positives "
+            "(product names, generic terms, project labels, technology names, phase names, "
+            "or garbled text from PDF extraction).\n\n"
+            f"Candidates: {_json.dumps(candidate_texts)}\n\n"
+            "Return ONLY candidates that are a REAL human full name (actual person's first+last name) "
+            "or a REAL company/organization name (registered business, institution, team name). "
+            'Respond with exactly: {"keep": ["...", "..."]} — no explanation, no markdown.'
+        )
+        resp = await llm.ainvoke([{"role": "user", "content": prompt}])
+        raw = resp.content if hasattr(resp, "content") else str(resp)
+        m = _re.search(r'\{[^}]*"keep"[^}]*\}', raw, _re.DOTALL)
+        if m:
+            parsed = _json.loads(m.group())
+            return [t.strip() for t in parsed.get("keep", []) if isinstance(t, str)]
+    except Exception:
+        pass
+    return list(candidate_texts)  # safe fallback: keep all
 
 
 # ---------------------------------------------------------------------------
@@ -80,11 +164,14 @@ def _detect_ner(text: str) -> list[PIISpan]:
     except ImportError:
         return []
 
+    labels = _ner_labels()
     doc = nlp(text)
     spans: list[PIISpan] = []
     counters: dict[str, int] = {}
     for ent in doc.ents:
-        if ent.label_ not in _NER_LABELS:
+        if ent.label_ not in labels:
+            continue
+        if _is_ner_noise(ent.text):
             continue
         counters[ent.label_] = counters.get(ent.label_, 0) + 1
         spans.append(

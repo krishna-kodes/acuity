@@ -37,6 +37,16 @@ class Settings(BaseSettings):
     pii_regex_enabled: bool = True
     pii_ner_enabled: bool = True
     pii_review_gate: bool = True
+    # Comma-separated spaCy entity labels to treat as PII. PERSON is core
+    # personal data; ORG/GPE are organisation/place names (not strictly
+    # personal PII) — narrow this to "PERSON" to cut false positives.
+    pii_ner_labels: str = "PERSON,ORG,GPE"
+    # Run the LLM quality filter automatically during ingestion so NER false
+    # positives never reach the PM review screen.
+    pii_auto_llm_filter: bool = True
+    # Below this extraction-quality score [0..1] a PDF is flagged as likely
+    # garbage (broken font/ligature mapping) and OCR fallback is attempted.
+    extraction_quality_threshold: float = 0.75
     chunk_size_max_tokens: int = 800
     chunk_size_min_tokens: int = 50
     top_k_retrieval: int = 20

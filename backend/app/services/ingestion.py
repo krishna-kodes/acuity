@@ -159,12 +159,32 @@ async def detect_and_stage_pii(
         return 0
 
     from app.models.pii import PIIDetection, PIIIngestionLog
-    from app.services.pii_detection import detect_pii, encrypt_original
+    from app.services.pii_detection import (
+        detect_pii,
+        encrypt_original,
+        filter_ner_candidates_llm,
+    )
 
     spans = detect_pii(full_text)
 
+    # P2: LLM quality filter — pre-prune NER false positives before review so
+    # garbage entities never reach the PM. PM can still Undo any pruned item.
+    ner_keep: set[str] = set()
+    if settings.pii_auto_llm_filter:
+        ner_texts = list({s.text for s in spans if s.method == "ner"})
+        if ner_texts:
+            ner_keep = set(await filter_ner_candidates_llm(ner_texts, str(project_id)))
+
     # Persist detections
+    pruned_count = 0
     for span in spans:
+        is_pruned = (
+            settings.pii_auto_llm_filter
+            and span.method == "ner"
+            and span.text not in ner_keep
+        )
+        if is_pruned:
+            pruned_count += 1
         detection = PIIDetection(
             document_id=document_id,
             text_original=encrypt_original(span.text),
@@ -172,7 +192,7 @@ async def detect_and_stage_pii(
             pii_type=span.pii_type,
             detection_method=span.method,
             confirmed=False,
-            overridden=False,
+            overridden=is_pruned,
         )
         db.add(detection)
 
@@ -180,7 +200,7 @@ async def detect_and_stage_pii(
         project_id=project_id,
         document_id=document_id,
         event="pii_detected",
-        detail=f"{len(spans)} spans detected",
+        detail=f"{len(spans)} spans detected, {pruned_count} NER false positives auto-pruned",
     )
     db.add(log)
 
