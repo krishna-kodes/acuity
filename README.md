@@ -202,6 +202,36 @@ acuity/
 
 ---
 
+## Data stores & maintenance
+
+Three stores share one project lifecycle and **must be reset together**:
+
+| Store | Path | Keyed by | Holds |
+|-------|------|----------|-------|
+| App DB | `backend/app.db` | `projects.id` | projects, documents, epics, metrics, … |
+| Vector DB | `backend/chroma_db/` | collection `project_<id>` | document chunk embeddings |
+| Checkpointer | `backend/project_state.db` | `thread_id = <id>` | LangGraph state + chat history |
+
+**Why this matters:** resetting only `app.db` recycles project IDs while the
+old `chroma_db/` collection and `project_state.db` thread survive. A reused
+project ID then inherits a previous document's embeddings and chat history —
+chat answers about the wrong document. These are *orphan* collections.
+
+Both `make db-reset` and the API `DELETE /api/v1/factory/reset-db` now wipe
+all three stores atomically, so this can't happen via the normal reset paths.
+
+```bash
+make vectordb-audit    # safe: lists orphan collections, exits non-zero if any
+make vectordb-prune    # deletes orphans only; keeps valid projects' embeddings
+make vectordb-reset    # nuke vector + checkpointer (stop the server first)
+```
+
+Run `make vectordb-audit` before a demo to confirm no stale data. If a single
+project chats about the wrong document, `make vectordb-prune` clears it without
+touching other projects.
+
+---
+
 ## API surface (all routes prefixed `/api/v1/`)
 
 OpenAPI docs at `http://localhost:8000/docs` when server is running.
@@ -221,9 +251,12 @@ make lint           ESLint + Ruff
 make typecheck-fe   tsc --noEmit
 make db-upgrade     Apply pending Alembic migrations
 make db-migrate     Generate new migration (MSG="description")
-make db-reset       DESTRUCTIVE: drop app.db and reapply all migrations
+make db-reset       DESTRUCTIVE: drop app.db + chroma_db + project_state.db, reapply migrations
 make seed           Seed demo employees, projects, technologies
-make seed-reset     Reset DB then reseed
+make seed-reset     Reset DB (app + vector + checkpointer) then reseed
+make vectordb-audit Report orphan chroma collections (no matching project row)
+make vectordb-prune Delete orphan collections + their checkpointer threads
+make vectordb-reset DESTRUCTIVE: wipe chroma_db + project_state.db (stop server first)
 make modules-extract  LLM-extract modules for a project (ID=<n>)
 make modules-approve  Approve modules and advance phase (ID=<n>)
 make pii-filter     Run LLM PII quality filter for a project (ID=<n>)
