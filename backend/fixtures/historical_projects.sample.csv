@@ -1,0 +1,6 @@
+name,domain,estimated_points,actual_points,duration_weeks,team_size
+Customer Portal Revamp,web,80,95,12.0,5
+Inventory Sync Service,backend,55,60,8.5,3
+Mobile Checkout Flow,mobile,40,38,6.0,4
+Internal Analytics Dashboard,data,120,150,16.0,6
+Payment Gateway Integration,backend,65,72,9.0,4

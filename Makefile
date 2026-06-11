@@ -6,6 +6,7 @@
 	lint-fe lint-be \
 	test-be typecheck-fe typecheck-be \
 	db-migrate db-upgrade db-reset seed seed-reset seed-offline fresh \
+	import-historical \
 	vectordb-reset vectordb-audit vectordb-prune \
 	modules-extract modules-approve pii-filter \
 	evals evals-baseline \
@@ -134,6 +135,10 @@ seed-reset: ## Reset DB then reseed (backend must be running)
 
 seed-offline: ## Seed reference data directly via DB session (no server needed)
 	cd backend && .venv/bin/python scripts/seed_offline.py
+
+import-historical: ## Import real historical projects from CSV (CSV=path [REPLACE=1])
+	@[ -n "$(CSV)" ] || (echo "Usage: make import-historical CSV=path/to/projects.csv [REPLACE=1]" && exit 1)
+	cd backend && .venv/bin/python scripts/import_historical.py "$(CSV)" $(if $(REPLACE),--replace,)
 
 fresh: ## **DESTRUCTIVE** full wipe + migrate + seed, no server needed (stop server first)
 	@echo "WARNING: This deletes backend/app.db, chroma_db/, and project_state.db, then reseeds"; \

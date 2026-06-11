@@ -241,6 +241,25 @@ Reference data = employees, historical projects (estimation calibration),
 approved technologies. User projects are created by uploading documents in
 the UI, not seeded.
 
+### Production historical projects
+
+`make seed` populates `historical_projects` with **Faker** rows — fine for
+dev, useless for real estimates. The estimation phase reads this table as
+reference data, so in production load your organisation's real past projects
+from a CSV:
+
+```bash
+# CSV header: name,domain,estimated_points,actual_points,duration_weeks,team_size
+make import-historical CSV=path/to/projects.csv            # upsert by name (idempotent)
+make import-historical CSV=path/to/projects.csv REPLACE=1  # truncate table first
+```
+
+`name` is the upsert key — re-running updates existing rows instead of
+duplicating. Other columns are optional (blank → NULL). Sample template:
+`backend/fixtures/historical_projects.sample.csv`. For a clean production
+load, run `make import-historical CSV=... REPLACE=1` to drop the Faker rows
+and insert only real data.
+
 ---
 
 ## API surface (all routes prefixed `/api/v1/`)
@@ -267,6 +286,7 @@ make seed           Seed reference data via API (employees, historical projects,
 make seed-offline   Seed reference data directly via DB session (no server needed)
 make seed-reset     Reset DB (app + vector + checkpointer) then reseed — server must be running
 make fresh          DESTRUCTIVE: full wipe + migrate + seed offline (no server needed)
+make import-historical  Import real historical projects from CSV (CSV=path [REPLACE=1])
 make vectordb-audit Report orphan chroma collections (no matching project row)
 make vectordb-prune Delete orphan collections + their checkpointer threads
 make vectordb-reset DESTRUCTIVE: wipe chroma_db + project_state.db (stop server first)
