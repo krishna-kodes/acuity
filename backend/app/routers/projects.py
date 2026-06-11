@@ -2578,7 +2578,13 @@ def update_sync_config(
     "/projects/{project_id}/chat-history",
     summary="Return persisted chat messages for this project",
 )
-async def get_chat_history(project_id: str) -> list[dict]:
+async def get_chat_history(
+    project_id: str,
+    db: Session = Depends(get_db),
+) -> list[dict]:
+    # Guard against stale/orphan project URLs whose app.db row was wiped but
+    # whose checkpointer thread still holds a previous document's conversation.
+    _get_project_or_404(project_id, db)
     wf = await get_workflow()
     config = {"configurable": {"thread_id": project_id}}
     existing = await wf.aget_state(config)
@@ -2594,6 +2600,10 @@ async def chat(
     body: ChatRequest,
     db: Session = Depends(get_db),
 ) -> StreamingResponse:
+    # Guard against stale/orphan project URLs whose app.db row was wiped but
+    # whose chroma collection still holds a previous document's embeddings.
+    _get_project_or_404(project_id, db)
+
     wf = await get_workflow()
     config = {"configurable": {"thread_id": project_id}}
 

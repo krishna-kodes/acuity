@@ -46,6 +46,44 @@ def seed_all(db: Session = Depends(get_db)) -> SeedResult:
     return SeedResult(seeded=total, status="ok")
 
 
+def _wipe_vector_store() -> int:
+    """Drop every ChromaDB collection. Returns count deleted.
+
+    Without this, collections orphan when app.db is reset — a stale
+    project URL keeps retrieving the old document's embeddings.
+    """
+    import chromadb
+
+    from app.config import settings
+
+    client = chromadb.PersistentClient(path=settings.chroma_persist_path)
+    names = [c.name for c in client.list_collections()]
+    for name in names:
+        try:
+            client.delete_collection(name)
+        except Exception:
+            pass
+    return len(names)
+
+
+def _wipe_checkpointer() -> None:
+    """Clear LangGraph checkpointer threads so chat history can't replay
+    a previous document's conversation after a reset."""
+    import sqlite3
+
+    try:
+        con = sqlite3.connect("./project_state.db")
+        for tbl in ("writes", "checkpoints"):
+            try:
+                con.execute(f"DELETE FROM {tbl}")
+            except Exception:
+                pass
+        con.commit()
+        con.close()
+    except Exception:
+        pass
+
+
 @router.delete("/factory/reset-db")
 def reset_db(db: Session = Depends(get_db)) -> dict:
     for table in _RESET_ORDER:
@@ -54,4 +92,6 @@ def reset_db(db: Session = Depends(get_db)) -> dict:
         except Exception:
             pass
     db.commit()
-    return {"status": "reset"}
+    collections_dropped = _wipe_vector_store()
+    _wipe_checkpointer()
+    return {"status": "reset", "collections_dropped": collections_dropped}
