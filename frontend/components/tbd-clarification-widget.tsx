@@ -120,7 +120,7 @@ function TBDItemRow({
           {/* Source sentence from document */}
           {item.source_sentence && (
             <blockquote className="mt-2.5 mb-2 pl-3 border-l-2 border-primary/40 text-xs text-foreground italic leading-relaxed">
-              "{item.source_sentence}"
+              &ldquo;{item.source_sentence}&rdquo;
             </blockquote>
           )}
           {/* Section / page reference */}
