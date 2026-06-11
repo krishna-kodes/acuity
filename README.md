@@ -374,5 +374,3 @@ EVAL_MODE=real python eval_suite.py --threshold 0.90
 33 test cases covering: retrieval source match, answer relevancy, reranker precision improvement, TBD detection (all 4 levels), tool selection accuracy, loop safety, phase ordering compliance, proposal completeness, tech stack rationale quality, effort estimate plausibility, GitHub ticket structure validity, round-trip sync, and groundedness.
 
 Primary eval metric: `pass@1`. CI gate threshold: 90%.
-
-
