@@ -47,18 +47,19 @@ async def classify(query: str, project_id: str) -> None:
     if not settings.domain_classifier_enabled:
         return
 
-    llm = get_llm(fast=True).with_structured_output(_ClassifierResult)
+    llm = get_llm(fast=True).with_structured_output(_ClassifierResult, include_raw=True)
     t0 = time.monotonic()
-    result: _ClassifierResult = await llm.with_config(
+    raw_result: dict = await llm.with_config(
         {"run_name": "domain_classifier"}
     ).ainvoke([HumanMessage(content=_PROMPT.format(query=query))])
     elapsed_ms = (time.monotonic() - t0) * 1000
+    result: _ClassifierResult = raw_result["parsed"]
 
     record_latency(int(project_id), "phase_2", "domain_classifier_node", elapsed_ms)
-    record_tokens(
-        int(project_id), "phase_2", settings.fast_llm_model,
-        150, 50, calc_cost(150, 50),
-    )
+    _usage = getattr(raw_result.get("raw"), "usage_metadata", None) or {}
+    _inp = int(_usage.get("input_tokens", 0))
+    _out = int(_usage.get("output_tokens", 0))
+    record_tokens(int(project_id), "phase_2", settings.fast_llm_model, _inp, _out, calc_cost(_inp, _out))
 
     if (
         not result.is_pm_related

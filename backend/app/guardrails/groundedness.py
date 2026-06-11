@@ -45,20 +45,21 @@ async def evaluate(response: str, context: str, project_id: str) -> Groundedness
     if not settings.groundedness_check_enabled:
         return None
 
-    llm = get_llm(fast=False).with_structured_output(_LLMResult)
+    llm = get_llm(fast=False).with_structured_output(_LLMResult, include_raw=True)
     t0 = time.monotonic()
-    gs: _LLMResult = await llm.with_config({"run_name": "groundedness_judge"}).ainvoke(
+    raw_result: dict = await llm.with_config({"run_name": "groundedness_judge"}).ainvoke(
         [HumanMessage(content=_GROUNDEDNESS_PROMPT.format(
             context=context, response=response
         ))]
     )
     elapsed_ms = (time.monotonic() - t0) * 1000
+    gs: _LLMResult = raw_result["parsed"]
 
     record_latency(int(project_id), "phase_2", "groundedness_judge_node", elapsed_ms)
-    record_tokens(
-        int(project_id), "phase_2", settings.main_llm_model,
-        200, 100, calc_cost(200, 100),
-    )
+    _usage = getattr(raw_result.get("raw"), "usage_metadata", None) or {}
+    _inp = int(_usage.get("input_tokens", 0))
+    _out = int(_usage.get("output_tokens", 0))
+    record_tokens(int(project_id), "phase_2", settings.main_llm_model, _inp, _out, calc_cost(_inp, _out))
 
     score = float(gs.score) if hasattr(gs, "score") else 0.0
     reasoning = gs.reasoning if hasattr(gs, "reasoning") else ""
