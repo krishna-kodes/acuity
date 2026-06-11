@@ -1,12 +1,12 @@
 # Direct dependencies — pinned to versions from working venv (Python 3.11.14)
 # Transitive deps resolved by pip. To regenerate: pip freeze > requirements.lock
 
-fastapi==0.111.0
-uvicorn[standard]==0.30.0
-sqlalchemy==2.0.30
+fastapi==0.136.3
+uvicorn[standard]==0.49.0
+sqlalchemy==2.0.50
 pydantic-settings==2.14.1
-python-multipart==0.0.9
-alembic==1.13.1
+python-multipart==0.0.32
+alembic==1.18.4
 httpx==0.28.1
 chromadb==1.5.9
 openai==2.41.0
@@ -24,11 +24,9 @@ langchain-google-genai==4.2.4
 langchain-openai==1.2.2
 cryptography==48.0.0
 aiosqlite==0.22.1
-# fastmcp uses starlette 1.x internally but we pin starlette below to keep
-# FastAPI 0.111.0 happy — tools are called directly, not via MCP transport.
 fastmcp==3.4.2
 mcp==1.27.2
-starlette==0.37.2
+starlette==1.2.1
 spacy>=3.7.0
 faker>=25.0.0
 rank-bm25==0.2.2
