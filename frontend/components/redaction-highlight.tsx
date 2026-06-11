@@ -257,14 +257,49 @@ export function RedactionHighlight({
   className,
 }: RedactionHighlightProps) {
   const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [statusFilter, setStatusFilter] = useState<"all" | "pending" | "redacted" | "kept">("all");
+  const [typeFilter, setTypeFilter] = useState<Set<string>>(new Set());
 
+  // Entity types present, sorted for a stable filter bar.
+  const allTypes = Array.from(new Set(detections.map((d) => d.type))).sort();
+
+  function matchesStatus(d: RedactionSpan): boolean {
+    if (statusFilter === "pending") return !d.decision;
+    if (statusFilter === "redacted") return d.decision === "confirmed";
+    if (statusFilter === "kept") return d.decision === "override";
+    return true;
+  }
+  // Empty typeFilter = no type filtering (show all types).
+  function matchesType(d: RedactionSpan): boolean {
+    return typeFilter.size === 0 || typeFilter.has(d.type);
+  }
+
+  const visible = detections.filter((d) => matchesStatus(d) && matchesType(d));
+  const filterActive = statusFilter !== "all" || typeFilter.size > 0;
+
+  function toggleType(type: string) {
+    setSelected(new Set());
+    setTypeFilter((prev) => {
+      const next = new Set(prev);
+      next.has(type) ? next.delete(type) : next.add(type);
+      return next;
+    });
+  }
+
+  function clearFilters() {
+    setStatusFilter("all");
+    setTypeFilter(new Set());
+  }
+
+  // Counts: true totals across all detections (not the filtered view).
   const confirmed = detections.filter((d) => d.decision === "confirmed").length;
   const pending   = detections.filter((d) => !d.decision).length;
-  const pendingIds = detections.filter((d) => !d.decision).map((d) => d.id);
+  // Selection/bulk operate on the visible pending set.
+  const pendingIds = visible.filter((d) => !d.decision).map((d) => d.id);
   const allPendingSelected = pendingIds.length > 0 && pendingIds.every((id) => selected.has(id));
 
-  // Group by type, sort within group by confidence desc, sort groups by max confidence desc
-  const groupMap = detections.reduce<Record<string, RedactionSpan[]>>((acc, d) => {
+  // Group the VISIBLE detections by type; sort within by confidence desc, groups by max confidence desc
+  const groupMap = visible.reduce<Record<string, RedactionSpan[]>>((acc, d) => {
     (acc[d.type] ??= []).push(d);
     return acc;
   }, {});
@@ -342,6 +377,11 @@ export function RedactionHighlight({
           <span className="text-xs text-text-muted">
             {confirmed} redacted · {pending} pending
           </span>
+          {filterActive && (
+            <span className="text-[11px] text-primary font-medium">
+              showing {visible.length}
+            </span>
+          )}
         </div>
 
         <div className="flex items-center gap-2">
@@ -372,6 +412,61 @@ export function RedactionHighlight({
         </div>
       </div>
 
+      {/* Filter bar */}
+      {detections.length > 0 && (
+        <div className="flex items-center gap-3 px-3.5 py-2 border-b border-border bg-background flex-wrap">
+          {/* Status segmented control */}
+          <div className="inline-flex rounded-md border border-border overflow-hidden">
+            {(["all", "pending", "redacted", "kept"] as const).map((s) => (
+              <button
+                key={s}
+                onClick={() => { setSelected(new Set()); setStatusFilter(s); }}
+                className={cn(
+                  "px-2.5 py-1 text-[11px] font-medium capitalize transition-colors border-r border-border last:border-r-0",
+                  statusFilter === s
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-surface-subtle text-text-secondary hover:bg-card",
+                )}
+              >
+                {s === "pending" ? "Action items" : s}
+              </button>
+            ))}
+          </div>
+
+          {/* Type chips */}
+          {allTypes.length > 1 && (
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {allTypes.map((t) => {
+                const on = typeFilter.has(t);
+                return (
+                  <button
+                    key={t}
+                    onClick={() => toggleType(t)}
+                    className={cn(
+                      "px-2 py-0.5 rounded-full text-[11px] font-medium border transition-colors",
+                      on
+                        ? "bg-accent-subtle text-accent-foreground border-accent/40"
+                        : "bg-surface-subtle text-text-muted border-border hover:text-foreground",
+                    )}
+                  >
+                    {t}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {filterActive && (
+            <button
+              onClick={clearFilters}
+              className="text-[11px] text-text-muted hover:text-foreground underline underline-offset-2 ml-auto"
+            >
+              Clear filters
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Grouped rows */}
       {groups.map(({ type, spans }) => (
         <GroupSection
@@ -387,6 +482,19 @@ export function RedactionHighlight({
           onConfirmGroup={handleConfirmGroup}
         />
       ))}
+
+      {/* Filtered-empty state (detections exist but none match the filter) */}
+      {detections.length > 0 && visible.length === 0 && (
+        <div className="flex flex-col items-center py-8 gap-2 text-center">
+          <p className="text-sm text-text-muted">No items match this filter.</p>
+          <button
+            onClick={clearFilters}
+            className="text-xs font-medium text-primary hover:text-accent-hover transition-colors"
+          >
+            Clear filters
+          </button>
+        </div>
+      )}
 
       {detections.length === 0 && (
         <div className="flex flex-col items-center py-8 gap-2 text-center">
