@@ -6,6 +6,7 @@
 	lint-fe lint-be \
 	test-be typecheck-fe typecheck-be \
 	db-migrate db-upgrade db-reset seed seed-reset \
+	vectordb-reset vectordb-audit vectordb-prune \
 	modules-extract modules-approve pii-filter \
 	evals evals-baseline \
 	clean
@@ -97,10 +98,30 @@ db-migrate: ## Generate a new Alembic migration (MSG="description")
 db-upgrade: ## Apply pending Alembic migrations
 	cd backend && .venv/bin/alembic upgrade head
 
-db-reset: ## **DESTRUCTIVE** drop app.db and reapply all migrations
-	@echo "WARNING: This will delete backend/app.db"; \
+db-reset: ## **DESTRUCTIVE** drop app.db + vector store + checkpointer, reapply migrations
+	@echo "WARNING: This deletes backend/app.db, chroma_db/, and project_state.db"; \
 	read -p "Continue? [y/N] " ans; \
-	[ "$$ans" = "y" ] && cd backend && rm -f app.db && .venv/bin/alembic upgrade head || echo "Aborted."
+	[ "$$ans" = "y" ] && cd backend && \
+		rm -f app.db app.db-shm app.db-wal && \
+		rm -rf chroma_db && \
+		rm -f project_state.db project_state.db-shm project_state.db-wal && \
+		.venv/bin/alembic upgrade head || echo "Aborted."
+
+# ── vector store ──────────────────────────────────────────────────────────────
+
+vectordb-reset: ## **DESTRUCTIVE** wipe chroma_db + checkpointer (stop server first)
+	@echo "WARNING: This deletes backend/chroma_db/ and project_state.db"; \
+	read -p "Continue? [y/N] " ans; \
+	[ "$$ans" = "y" ] && cd backend && \
+		rm -rf chroma_db && \
+		rm -f project_state.db project_state.db-shm project_state.db-wal && \
+		echo "Vector store + checkpointer wiped." || echo "Aborted."
+
+vectordb-audit: ## Report orphan chroma collections (no matching project row)
+	cd backend && .venv/bin/python scripts/vectordb_audit.py
+
+vectordb-prune: ## Delete orphan chroma collections + their checkpointer threads
+	cd backend && .venv/bin/python scripts/vectordb_audit.py --prune
 
 # ── seed ──────────────────────────────────────────────────────────────────────
 
