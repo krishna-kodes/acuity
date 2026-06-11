@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { PhaseProgressStepper } from "@/components/phase-progress-stepper";
 import { ChatThread } from "@/components/chat-thread";
+import { SourcesPanel } from "@/components/sources-panel";
 import { TBDClarificationWidget } from "@/components/tbd-clarification-widget";
 import { ErrorBanner } from "@/components/page-states";
 import { getPhasesForRoute, getNextPhaseRoute } from "@/lib/project-phases";
@@ -211,6 +212,21 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
   const [newTbdIds, setNewTbdIds] = useState<Set<string>>(new Set());
   const [showSuggestions, setShowSuggestions] = useState(false);
 
+  // Citation / sources preview panel
+  const [showSources, setShowSources] = useState(false);
+  const [activeSources, setActiveSources] = useState<ChatSource[]>([]);
+  const [activeChunkId, setActiveChunkId] = useState<string | null>(null);
+
+  function handleCitationClick(source: ChatSource) {
+    // Use the full source set of the message the chip belongs to.
+    const owner = messages.find((m) =>
+      m.sources?.some((s) => s.chunk_id === source.chunk_id)
+    );
+    setActiveSources(owner?.sources ?? [source]);
+    setActiveChunkId(source.chunk_id);
+    setShowSources(true);
+  }
+
   // Proposal preview state
   const [proposalData, setProposalData] = useState<ProposalData | null>(null);
   const [retryComment, setRetryComment] = useState("");
@@ -272,6 +288,7 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
         text: m.content,
         timestamp: ts,
         confidenceScore: m.groundedness_score ?? undefined,
+        sources: (m.sources ?? undefined) as ChatMessage["sources"],
       })));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chatHistory]);
@@ -309,11 +326,15 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
         for (const line of lines) {
           if (!line.startsWith("data: ")) continue;
           try {
-            const event = JSON.parse(line.slice(6)) as { type: string; content?: string };
+            const event = JSON.parse(line.slice(6)) as { type: string; content?: string; items?: unknown[] };
             if (event.type === "token" && event.content) {
               accumulated += event.content;
               setMessages((prev) =>
                 prev.map((m) => m.id === aiId ? { ...m, text: accumulated } : m)
+              );
+            } else if (event.type === "sources") {
+              setMessages((prev) =>
+                prev.map((m) => m.id === aiId ? { ...m, sources: event.items as ChatSource[] } : m)
               );
             } else if (event.type === "tbds") {
               queryClient.invalidateQueries({ queryKey: ["tbds", projectId] });
@@ -632,6 +653,7 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
               onRetry={handleChatRetry}
               suggestedReplies={showSuggestions ? SUGGESTED_REPLIES : undefined}
               onSuggestionClick={handleSuggestionClick}
+              onCitationClick={handleCitationClick}
             />
             <div ref={bottomRef} />
           </div>
@@ -675,10 +697,17 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
           </div>
         </div>
 
-        {/* Right: TBD widget / proposal preview */}
+        {/* Right: sources / TBD widget / proposal preview */}
         <div className="w-full lg:w-80 shrink-0 flex flex-col overflow-hidden">
 
-          {proposalData ? (
+          {showSources ? (
+            /* ── Citation sources preview panel ── */
+            <SourcesPanel
+              sources={activeSources}
+              activeChunkId={activeChunkId}
+              onBack={() => setShowSources(false)}
+            />
+          ) : proposalData ? (
             /* ── Proposal preview panel ── */
             <>
               {/* Header */}

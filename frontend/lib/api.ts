@@ -27,10 +27,19 @@ export const getTBDs = (projectId: string) =>
     params: { path: { project_id: projectId } },
   })
 
+export interface StoredChatSource {
+  chunk_id: string;
+  chunk_index?: number | null;
+  section_hint: string;
+  page_number?: number | null;
+  text?: string;
+}
+
 export interface StoredChatMessage {
   role: "user" | "assistant";
   content: string;
   groundedness_score?: number | null;
+  sources?: StoredChatSource[];
 }
 
 export const getChatHistory = async (projectId: string): Promise<StoredChatMessage[]> => {
