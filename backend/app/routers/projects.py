@@ -662,9 +662,7 @@ async def pii_llm_filter(
     Returns {"candidates_sent": int, "kept": int, "pruned": int}.
     Safe fallback: if LLM call fails, all candidates are kept unchanged.
     """
-    import re as _re
     from app.models.pii import PIIDetection
-    from app.services.llm_factory import get_llm
     from app.services.pii_detection import decrypt_original
 
     _get_project_or_404(project_id, db)
@@ -690,38 +688,10 @@ async def pii_llm_filter(
     if not ner_dets:
         return {"candidates_sent": 0, "kept": 0, "pruned": 0}
 
-    candidates = [{"id": d.id, "text": decrypt_original(d.text_original)} for d in ner_dets]
-    candidate_texts = [c["text"] for c in candidates]
+    from app.services.pii_detection import filter_ner_candidates_llm
 
-    keep_texts: list[str] = list(candidate_texts)  # default: keep all (safe fallback)
-    import time as _time
-    from app.services.metrics_tracker import record_tokens, record_latency, calc_cost
-    _t0 = _time.monotonic()
-    try:
-        llm = get_llm()
-        prompt = (
-            "You are a PII detection validator. These text spans were flagged by an NER model "
-            "as possibly containing person names or organization names. Many are false positives "
-            "(product names, generic terms, project labels, technology names, phase names).\n\n"
-            f"Candidates: {json.dumps(candidate_texts)}\n\n"
-            "Return ONLY candidates that are a REAL human full name (actual person's first+last name) "
-            "or a REAL company/organization name (registered business, institution, team name). "
-            'Respond with exactly: {"keep": ["...", "..."]} — no explanation, no markdown.'
-        )
-        resp = await llm.ainvoke([{"role": "user", "content": prompt}])
-        raw = resp.content if hasattr(resp, "content") else str(resp)
-        m = _re.search(r'\{[^}]*"keep"[^}]*\}', raw, _re.DOTALL)
-        if m:
-            parsed = json.loads(m.group())
-            keep_texts = [t.strip() for t in parsed.get("keep", []) if isinstance(t, str)]
-        usage = getattr(resp, "usage_metadata", None) or {}
-        in_tok = int(usage.get("input_tokens", 0))
-        out_tok = int(usage.get("output_tokens", 0))
-        model_name = getattr(llm, "model_name", None) or getattr(llm, "model", "unknown")
-        record_tokens(int(project_id), "phase_1", model_name, in_tok, out_tok, calc_cost(in_tok, out_tok))
-        record_latency(int(project_id), "phase_1", "pii_llm_filter", (_time.monotonic() - _t0) * 1000)
-    except Exception:
-        pass  # safe fallback: keep_texts already set to all candidates
+    candidate_texts = [decrypt_original(d.text_original) for d in ner_dets]
+    keep_texts = await filter_ner_candidates_llm(candidate_texts, project_id)
 
     pruned = 0
     for det in ner_dets:
