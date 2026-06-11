@@ -42,8 +42,9 @@ make dev-fe   # → http://localhost:3000  (new terminal)
 ```
 
 ```bash
-# 5. (Optional) seed demo data — backend must be running
-make seed
+# 5. (Optional) seed demo reference data
+make seed          # via API — backend must be running
+make seed-offline  # or directly via DB session — no server needed
 ```
 
 ---
@@ -163,13 +164,17 @@ acuity/
 ├── backend/
 │   ├── app/
 │   │   ├── routers/projects.py  All project API endpoints (~2600 lines)
-│   │   ├── guardrails/          domain_classifier, retrieval_gate, groundedness
+│   │   ├── guardrails/          prompt_injection, domain_classifier, retrieval_gate,
+│   │   │                        groundedness, output_monitor
 │   │   ├── models/              SQLAlchemy ORM
 │   │   ├── schemas/             Pydantic request/response schemas
 │   │   ├── services/            workflow.py (LangGraph), rag.py, ingestion.py,
 │   │   │                        llm_factory.py, sync_factory.py, proposal_generator.py,
 │   │   │                        pii_detection.py, tbd_detection.py, seeder.py, …
 │   │   └── mcp/                 github_server.py, jira_server.py (FastMCP)
+│   ├── scripts/                 Ops/CLI: vectordb_audit.py, seed_offline.py,
+│   │                            import_historical.py
+│   ├── fixtures/                historical_projects.sample.csv (import template)
 │   ├── alembic/versions/        Migration history
 │   └── tests/                   pytest suite
 ├── evals/                       Eval harness, graders, tool schemas
