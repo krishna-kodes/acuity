@@ -27,9 +27,6 @@ class GateResult:
 
 def evaluate(chunks: list[dict], project_id: str, scores: list[float]) -> GateResult:
     """Evaluate retrieval quality. Returns GateResult — never raises."""
-    if not settings.retrieval_gate_enabled:
-        return GateResult(status="pass", chunks=chunks)
-
     if not chunks:
         log_guardrail(project_id, 2, "no_results", None, {"n_chunks": 0})
         return GateResult(
@@ -40,6 +37,9 @@ def evaluate(chunks: list[dict], project_id: str, scores: list[float]) -> GateRe
                 "content that's already uploaded."
             ),
         )
+
+    if not settings.retrieval_gate_enabled:
+        return GateResult(status="pass", chunks=chunks)
 
     mismatched = [c for c in chunks if str(c.get("project_id", "")) != str(project_id)]
     if mismatched:

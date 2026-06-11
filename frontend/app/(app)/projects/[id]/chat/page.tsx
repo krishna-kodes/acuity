@@ -19,7 +19,7 @@ import {
   getChatHistory,
 } from "@/lib/api";
 import type { ProposalData, StructuredSection, SectionStatus, RiskItem, PersonaItem, FeatureItem } from "@/lib/api";
-import type { ChatMessage } from "@/components/chat-thread";
+import type { ChatMessage, ChatSource } from "@/components/chat-thread";
 import type { TBDItem, TBDAction } from "@/components/tbd-clarification-widget";
 import { cn } from "@/lib/utils";
 
@@ -184,6 +184,12 @@ const TBD_LEVEL_LABELS: Record<number, TBDItem["level"]> = {
   4: "Contradiction",
 };
 
+const SUGGESTED_REPLIES = [
+  "Which TBDs should I prioritize?",
+  "Summarize the outstanding items",
+  "What details are needed to resolve these?",
+];
+
 
 export default function ChatPage({ params }: { params: Promise<{ id: string }> }) {
   const { id: projectId } = use(params);
@@ -198,6 +204,12 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
   const bottomRef    = useRef<HTMLDivElement>(null);
   const sendingRef   = useRef(false);
   const autoSentRef  = useRef(false);
+  const lastSentMessageRef = useRef<string>("");
+  const messagesInitializedRef = useRef(false);
+  const prevTbdIdsRef = useRef<Set<string>>(new Set());
+  const tbdInitializedRef = useRef(false);
+  const [newTbdIds, setNewTbdIds] = useState<Set<string>>(new Set());
+  const [showSuggestions, setShowSuggestions] = useState(false);
 
   // Proposal preview state
   const [proposalData, setProposalData] = useState<ProposalData | null>(null);
@@ -212,13 +224,20 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
     queryFn: async () => {
       const { data, error } = await getTBDs(projectId);
       if (error) throw new Error(String(error));
-      return (data ?? []).map((t) => ({
-        id: t.id,
-        title: t.question,
-        desc: t.question,
-        level: TBD_LEVEL_LABELS[t.level] ?? "Explicit TBD",
-        status: ((t as { status?: string }).status ?? "open") as TBDAction | "open",
-      }));
+      return (data ?? []).map((t) => {
+        const raw = t as { status?: string; source_sentence?: string | null; source_section?: string | null; source_page?: number | null };
+        const title = t.question.length > 80 ? t.question.slice(0, 77) + "…" : t.question;
+        return {
+          id: t.id,
+          title,
+          desc: t.question,
+          level: TBD_LEVEL_LABELS[t.level] ?? "Explicit TBD",
+          status: (raw.status ?? "open") as TBDAction | "open",
+          source_sentence: raw.source_sentence ?? null,
+          source_section: raw.source_section ?? null,
+          source_page: raw.source_page ?? null,
+        };
+      });
     },
     staleTime: 0,
     refetchOnWindowFocus: false,
@@ -242,19 +261,16 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
 
   useEffect(() => {
     if (!chatHistory || chatHistory.length === 0) return;
+    if (messagesInitializedRef.current) return;
+    messagesInitializedRef.current = true;
     const ts = new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
-    setMessages(prev => chatHistory.map((m, i) => {
-      const role = m.role === "user" ? ("pm" as const) : ("ai" as const);
-      const existing = prev.find(p => p.role === role && p.text === m.content);
-      return {
-        id: `history-${i}`,
-        role,
-        text: m.content,
-        timestamp: ts,
-        confidenceScore: existing?.confidenceScore,
-        groundednessWarning: existing?.groundednessWarning,
-      };
-    }));
+    setMessages(chatHistory.map((m, i) => ({
+      id: `history-${i}`,
+      role: m.role === "user" ? ("pm" as const) : ("ai" as const),
+      text: m.content,
+      timestamp: ts,
+      confidenceScore: m.groundedness_score ?? undefined,
+    })));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chatHistory]);
 
@@ -328,11 +344,28 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
     el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
   }, [input]);
 
-  async function sendMessage() {
-    const text = input.trim();
+  // Highlight newly detected TBD items from the last chat turn
+  useEffect(() => {
+    if (!remoteTbds) return;
+    const incoming = new Set(remoteTbds.map(t => t.id));
+    if (!tbdInitializedRef.current) {
+      tbdInitializedRef.current = true;
+      prevTbdIdsRef.current = incoming;
+      return;
+    }
+    const newIds = new Set([...incoming].filter(id => !prevTbdIdsRef.current.has(id)));
+    prevTbdIdsRef.current = incoming;
+    if (newIds.size === 0) return;
+    setNewTbdIds(newIds);
+    const timer = setTimeout(() => setNewTbdIds(new Set()), 3000);
+    return () => clearTimeout(timer);
+  }, [remoteTbds]);
+
+  async function doSend(text: string) {
     if (!text || isLoading || sendingRef.current) return;
     sendingRef.current = true;
-    setInput("");
+    lastSentMessageRef.current = text;
+    setShowSuggestions(false);
 
     const userMsg: ChatMessage = {
       id: String(Date.now()),
@@ -343,108 +376,134 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
     setMessages((prev) => [...prev, userMsg]);
     setIsLoading(true);
 
-  // Add empty AI message placeholder
-  const aiId = String(Date.now() + 1);
-  const ts = new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
-  setMessages((prev) => [...prev, { id: aiId, role: "ai" as const, text: "", timestamp: ts }]);
+    const aiId = String(Date.now() + 1);
+    const ts = new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
+    setMessages((prev) => [...prev, { id: aiId, role: "ai" as const, text: "", timestamp: ts }]);
 
-  try {
-    const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-    const response = await fetch(
-      `${apiBase}/api/v1/projects/${projectId}/chat`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text, proceed: false }),
+    try {
+      const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+      const response = await fetch(
+        `${apiBase}/api/v1/projects/${projectId}/chat`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message: text, proceed: false }),
+        }
+      );
+
+      if (!response.ok) {
+        const errBody = await response.json().catch(() => null);
+        throw new Error(errBody?.detail ?? `HTTP ${response.status}`);
       }
-    );
+      if (!response.body) {
+        throw new Error(`HTTP ${response.status}`);
+      }
 
-    if (!response.ok) {
-      const errBody = await response.json().catch(() => null);
-      throw new Error(errBody?.detail ?? `HTTP ${response.status}`);
-    }
-    if (!response.body) {
-      throw new Error(`HTTP ${response.status}`);
-    }
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let accumulated = "";
 
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-    let accumulated = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() ?? "";
-
-      for (const line of lines) {
-        if (!line.startsWith("data: ")) continue;
-        try {
-          const event = JSON.parse(line.slice(6)) as {
-            type: string;
-            content?: string;
-            items?: unknown[];
-            message?: string;
-            score?: number;
-            unsupported_claims?: string[];
-            reasoning?: string;
-            source?: string | null;
-            status?: string;
-          };
-          if (event.type === "token" && event.content) {
-            accumulated += event.content;
-            setMessages((prev) =>
-              prev.map((m) => m.id === aiId ? { ...m, text: accumulated } : m)
-            );
-          } else if (event.type === "groundedness" && event.score != null) {
-            setMessages((prev) =>
-              prev.map((m) => m.id === aiId ? { ...m, confidenceScore: event.score } : m)
-            );
-          } else if (event.type === "groundedness_warning") {
-            setMessages((prev) =>
-              prev.map((m) => m.id === aiId
-                ? { ...m, groundednessWarning: { score: event.score ?? 0, unsupported_claims: event.unsupported_claims ?? [], reasoning: event.reasoning ?? "", source: event.source ?? null } }
-                : m
-              )
-            );
-          } else if (event.type === "gate_blocked") {
-            setMessages((prev) =>
-              prev.map((m) => m.id === aiId
-                ? { ...m, text: event.message ?? "I couldn't find relevant information in your document." }
-                : m
-              )
-            );
-          } else if (event.type === "tbds") {
-            queryClient.invalidateQueries({ queryKey: ["tbds", projectId] });
-          } else if (event.type === "done") {
-            queryClient.invalidateQueries({ queryKey: ["chat-history", projectId] });
-            break;
-          } else if (event.type === "error") {
-            throw new Error(event.content ?? event.message ?? "Stream error");
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          try {
+            const event = JSON.parse(line.slice(6)) as {
+              type: string;
+              content?: string;
+              items?: unknown[];
+              message?: string;
+              score?: number;
+              unsupported_claims?: string[];
+              reasoning?: string;
+              source?: string | null;
+              status?: string;
+            };
+            if (event.type === "token" && event.content) {
+              accumulated += event.content;
+              setMessages((prev) =>
+                prev.map((m) => m.id === aiId ? { ...m, text: accumulated } : m)
+              );
+            } else if (event.type === "groundedness" && event.score != null) {
+              setMessages((prev) =>
+                prev.map((m) => m.id === aiId ? { ...m, confidenceScore: event.score } : m)
+              );
+            } else if (event.type === "groundedness_warning") {
+              setMessages((prev) =>
+                prev.map((m) => m.id === aiId
+                  ? { ...m, groundednessWarning: { score: event.score ?? 0, unsupported_claims: event.unsupported_claims ?? [], reasoning: event.reasoning ?? "", source: event.source ?? null } }
+                  : m
+                )
+              );
+            } else if (event.type === "gate_blocked") {
+              setMessages((prev) =>
+                prev.map((m) => m.id === aiId
+                  ? { ...m, text: event.message ?? "I couldn't find relevant information in your document." }
+                  : m
+                )
+              );
+            } else if (event.type === "sources") {
+              setMessages((prev) =>
+                prev.map((m) => m.id === aiId ? { ...m, sources: event.items as ChatSource[] } : m)
+              );
+            } else if (event.type === "tbds") {
+              queryClient.invalidateQueries({ queryKey: ["tbds", projectId] });
+              setShowSuggestions(true);
+            } else if (event.type === "done") {
+              queryClient.invalidateQueries({ queryKey: ["chat-history", projectId] });
+              break;
+            } else if (event.type === "error") {
+              throw new Error(event.content ?? event.message ?? "Stream error");
+            }
+          } catch {
+            // skip malformed SSE lines
           }
-        } catch {
-          // skip malformed SSE lines
         }
       }
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : null;
+      const displayText = errMsg && !errMsg.startsWith("HTTP ")
+        ? errMsg
+        : "Sorry, I couldn't get a response. Please try again.";
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === aiId ? { ...m, text: displayText, isError: true } : m
+        )
+      );
+    } finally {
+      setIsLoading(false);
+      sendingRef.current = false;
     }
-  } catch (err) {
-    const errMsg = err instanceof Error ? err.message : null;
-    const displayText = errMsg && !errMsg.startsWith("HTTP ")
-      ? errMsg
-      : "Sorry, I couldn't get a response. Please try again.";
-    setMessages((prev) =>
-      prev.map((m) =>
-        m.id === aiId
-          ? { ...m, text: displayText }
-          : m
-      )
-    );
-  } finally {
-    setIsLoading(false);
-    sendingRef.current = false;
   }
+
+  function sendMessage() {
+    const text = input.trim();
+    if (!text) return;
+    setInput("");
+    doSend(text);
+  }
+
+  function handleChatRetry() {
+    const lastMsg = lastSentMessageRef.current;
+    if (!lastMsg || isLoading) return;
+    setMessages(prev => {
+      const last = prev[prev.length - 1];
+      if (last?.role === "ai" && (last.isError || !last.text)) {
+        return prev.slice(0, -2);
+      }
+      return prev;
+    });
+    doSend(lastMsg);
+  }
+
+  function handleSuggestionClick(text: string) {
+    doSend(text);
   }
 
   const TBD_ACTION_TO_API: Record<TBDAction, string> = {
@@ -453,9 +512,9 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
     oos: "Out-of-Scope",
   };
 
-  function handleTBDAction(id: string, action: TBDAction) {
+  function handleTBDAction(id: string, action: TBDAction, answer?: string) {
     setLocalStatuses((prev) => ({ ...prev, [id]: action }));
-    submitClarification(projectId, id, TBD_ACTION_TO_API[action]).catch(() => {
+    submitClarification(projectId, id, TBD_ACTION_TO_API[action], answer).catch(() => {
       // Fire-and-forget; local state already updated
     });
   }
@@ -564,7 +623,13 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
         <div className="flex flex-col flex-1 min-w-0 border-b lg:border-b-0 lg:border-r border-border min-h-[50vh] lg:min-h-0">
           {/* Messages */}
           <div className="flex-1 overflow-y-auto px-4 py-4">
-            <ChatThread messages={messages} isLoading={isLoading} />
+            <ChatThread
+              messages={messages}
+              isLoading={isLoading}
+              onRetry={handleChatRetry}
+              suggestedReplies={showSuggestions ? SUGGESTED_REPLIES : undefined}
+              onSuggestionClick={handleSuggestionClick}
+            />
             <div ref={bottomRef} />
           </div>
 
@@ -608,7 +673,7 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
         </div>
 
         {/* Right: TBD widget / proposal preview */}
-        <div className="w-full lg:w-80 shrink-0 flex flex-col overflow-hidden lg:overflow-y-auto">
+        <div className="w-full lg:w-80 shrink-0 flex flex-col overflow-hidden">
 
           {proposalData ? (
             /* ── Proposal preview panel ── */
@@ -743,16 +808,20 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
                   <div className="flex gap-2">
                     <button
                       onClick={() => setShowRetryInput(true)}
-                      className="flex-1 py-2 rounded-md text-xs font-medium border border-border text-foreground hover:bg-card transition-colors"
+                      disabled={generating || retrying}
+                      className={cn(
+                        "flex-1 py-2 rounded-md text-xs font-medium border border-border text-foreground transition-colors",
+                        generating || retrying ? "opacity-50 cursor-not-allowed" : "hover:bg-card",
+                      )}
                     >
                       Retry with Comment
                     </button>
                     <button
                       onClick={handleApprove}
-                      disabled={approving}
+                      disabled={approving || generating || retrying}
                       className={cn(
                         "flex-1 flex items-center justify-center gap-1.5 py-2 rounded-md text-xs font-medium transition-colors",
-                        !approving
+                        !approving && !generating && !retrying
                           ? "bg-primary text-primary-foreground hover:bg-accent-hover"
                           : "bg-muted text-text-muted cursor-not-allowed"
                       )}
@@ -805,7 +874,8 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
                 </div>
               </div>
 
-              <div className="flex-1 overflow-y-auto px-4 py-4">
+              <div className="flex-1 min-h-0 relative">
+              <div className="absolute inset-0 overflow-y-auto px-4 py-4">
                 {tbdsPending ? (
                   <div className="flex flex-col gap-2">
                     {[1, 2, 3].map((i) => (
@@ -823,8 +893,10 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
                     </button>
                   </div>
                 ) : (
-                  <TBDClarificationWidget items={tbdItems} onAction={handleTBDAction} onBulkAction={handleBulkTBDAction} />
+                  <TBDClarificationWidget items={tbdItems} onAction={handleTBDAction} onBulkAction={handleBulkTBDAction} newItemIds={newTbdIds} />
                 )}
+              </div>
+              <div className="pointer-events-none absolute bottom-0 inset-x-0 h-8 bg-gradient-to-t from-background to-transparent" />
               </div>
 
               {/* Generate Proposal */}

@@ -30,6 +30,7 @@ export const getTBDs = (projectId: string) =>
 export interface StoredChatMessage {
   role: "user" | "assistant";
   content: string;
+  groundedness_score?: number | null;
 }
 
 export const getChatHistory = async (projectId: string): Promise<StoredChatMessage[]> => {

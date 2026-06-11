@@ -28,6 +28,9 @@ class Clarification(Base):
     )
     action: Mapped[TBDAction | None] = mapped_column(SAEnum(TBDAction))
     answer: Mapped[str | None] = mapped_column(Text)
+    source_sentence: Mapped[str | None] = mapped_column(Text)          # sentence/excerpt containing the TBD
+    source_section: Mapped[str | None] = mapped_column(String(200))    # section_hint from chunk metadata
+    source_page: Mapped[int | None] = mapped_column(Integer)           # page number from chunk metadata
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
