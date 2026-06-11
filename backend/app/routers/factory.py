@@ -71,8 +71,10 @@ def _wipe_checkpointer() -> None:
     a previous document's conversation after a reset."""
     import sqlite3
 
+    from app.config import settings
+
     try:
-        con = sqlite3.connect("./project_state.db")
+        con = sqlite3.connect(settings.project_state_db_path)
         for tbl in ("writes", "checkpoints"):
             try:
                 con.execute(f"DELETE FROM {tbl}")

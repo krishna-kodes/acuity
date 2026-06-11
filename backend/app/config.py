@@ -32,6 +32,11 @@ class Settings(BaseSettings):
     branding_prepared_by: str = ""
     embedding_dimensions: int = 1536
     chroma_persist_path: str = "./chroma_db"
+    # SQLAlchemy URL for the application DB. Override APP_DB_PATH in deploy to
+    # point at a persistent volume, e.g. sqlite:////data/app.db.
+    app_db_path: str = "sqlite:///./app.db"
+    # Filesystem path to the LangGraph checkpointer DB (kept separate from app.db).
+    project_state_db_path: str = "./project_state.db"
     pii_encryption_key: str = ""
     pii_detection_enabled: bool = True
     pii_regex_enabled: bool = True

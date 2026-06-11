@@ -3,8 +3,10 @@ from collections.abc import Generator
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
 
+from app.config import settings
+
 engine = create_engine(
-    "sqlite:///./app.db",
+    settings.app_db_path,
     connect_args={"check_same_thread": False},
 )
 
