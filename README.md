@@ -230,6 +230,17 @@ Run `make vectordb-audit` before a demo to confirm no stale data. If a single
 project chats about the wrong document, `make vectordb-prune` clears it without
 touching other projects.
 
+**Clean slate.** To wipe all three stores and reseed reference data in one
+step (server stopped):
+
+```bash
+make fresh    # rm app.db + chroma_db + project_state.db → migrate → seed offline
+```
+
+Reference data = employees, historical projects (estimation calibration),
+approved technologies. User projects are created by uploading documents in
+the UI, not seeded.
+
 ---
 
 ## API surface (all routes prefixed `/api/v1/`)
@@ -252,8 +263,10 @@ make typecheck-fe   tsc --noEmit
 make db-upgrade     Apply pending Alembic migrations
 make db-migrate     Generate new migration (MSG="description")
 make db-reset       DESTRUCTIVE: drop app.db + chroma_db + project_state.db, reapply migrations
-make seed           Seed demo employees, projects, technologies
-make seed-reset     Reset DB (app + vector + checkpointer) then reseed
+make seed           Seed reference data via API (employees, historical projects, technologies) — server must be running
+make seed-offline   Seed reference data directly via DB session (no server needed)
+make seed-reset     Reset DB (app + vector + checkpointer) then reseed — server must be running
+make fresh          DESTRUCTIVE: full wipe + migrate + seed offline (no server needed)
 make vectordb-audit Report orphan chroma collections (no matching project row)
 make vectordb-prune Delete orphan collections + their checkpointer threads
 make vectordb-reset DESTRUCTIVE: wipe chroma_db + project_state.db (stop server first)

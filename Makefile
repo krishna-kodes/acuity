@@ -5,7 +5,7 @@
 	build lint test \
 	lint-fe lint-be \
 	test-be typecheck-fe typecheck-be \
-	db-migrate db-upgrade db-reset seed seed-reset \
+	db-migrate db-upgrade db-reset seed seed-reset seed-offline fresh \
 	vectordb-reset vectordb-audit vectordb-prune \
 	modules-extract modules-approve pii-filter \
 	evals evals-baseline \
@@ -128,9 +128,24 @@ vectordb-prune: ## Delete orphan chroma collections + their checkpointer threads
 seed: ## Seed all factory data via API (backend must be running)
 	curl -s -X POST http://localhost:8000/api/v1/factory/seed-all | python3 -m json.tool
 
-seed-reset: ## Reset DB then reseed
+seed-reset: ## Reset DB then reseed (backend must be running)
 	curl -s -X DELETE http://localhost:8000/api/v1/factory/reset-db | python3 -m json.tool
 	curl -s -X POST  http://localhost:8000/api/v1/factory/seed-all  | python3 -m json.tool
+
+seed-offline: ## Seed reference data directly via DB session (no server needed)
+	cd backend && .venv/bin/python scripts/seed_offline.py
+
+fresh: ## **DESTRUCTIVE** full wipe + migrate + seed, no server needed (stop server first)
+	@echo "WARNING: This deletes backend/app.db, chroma_db/, and project_state.db, then reseeds"; \
+	read -p "Continue? [y/N] " ans; \
+	[ "$$ans" = "y" ] || { echo "Aborted."; exit 0; }; \
+	cd backend && \
+		rm -f app.db app.db-shm app.db-wal && \
+		rm -rf chroma_db && \
+		rm -f project_state.db project_state.db-shm project_state.db-wal && \
+		.venv/bin/alembic upgrade head && \
+		.venv/bin/python scripts/seed_offline.py && \
+		echo "Fresh DB ready. Start servers: make dev"
 
 # ── project phase helpers (backend must be running) ───────────────────────────
 
