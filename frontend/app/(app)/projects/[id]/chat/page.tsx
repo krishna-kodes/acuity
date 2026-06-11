@@ -252,7 +252,7 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
   const allTbdsResolved = !tbdsPending && (tbdItems.length === 0 || outstandingTbds === 0);
 
   // Hydrate persisted chat history from backend
-  const { data: chatHistory, isSuccess: chatHistoryLoaded } = useQuery({
+  const { data: chatHistory, isPending: chatHistoryPending } = useQuery({
     queryKey: ["chat-history", projectId],
     queryFn: () => getChatHistory(projectId),
     staleTime: Infinity,
@@ -264,22 +264,25 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
     if (messagesInitializedRef.current) return;
     messagesInitializedRef.current = true;
     const ts = new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
-    setMessages(chatHistory.map((m, i) => ({
-      id: `history-${i}`,
-      role: m.role === "user" ? ("pm" as const) : ("ai" as const),
-      text: m.content,
-      timestamp: ts,
-      confidenceScore: m.groundedness_score ?? undefined,
-    })));
+    setMessages(chatHistory
+      .filter((m) => !(m.role === "user" && m.content === AUTO_PROMPT))
+      .map((m, i) => ({
+        id: `history-${i}`,
+        role: m.role === "user" ? ("pm" as const) : ("ai" as const),
+        text: m.content,
+        timestamp: ts,
+        confidenceScore: m.groundedness_score ?? undefined,
+      })));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chatHistory]);
 
   // Auto-send opening summary prompt for new sessions
   useEffect(() => {
-    if (!chatHistoryLoaded) return;
+    if (chatHistoryPending) return;
     if (chatHistory && chatHistory.length > 0) return;
     if (autoSentRef.current) return;
     autoSentRef.current = true;
+    messagesInitializedRef.current = true; // prevent hydration overwriting streaming state
 
     const aiId = "auto-welcome";
     const ts = new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
@@ -329,7 +332,7 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
       setIsLoading(false);
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chatHistoryLoaded]);
+  }, [chatHistoryPending]);
 
   // Auto-scroll on new messages
   useEffect(() => {
@@ -362,7 +365,7 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
   }, [remoteTbds]);
 
   async function doSend(text: string) {
-    if (!text || isLoading || sendingRef.current) return;
+    if (!text || isLoading || sendingRef.current || chatHistoryPending) return;
     sendingRef.current = true;
     lastSentMessageRef.current = text;
     setShowSuggestions(false);

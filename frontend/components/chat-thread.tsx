@@ -259,6 +259,8 @@ export function ChatThread({
 
       {messages.map((message, i) => {
         const isLast = i === messages.length - 1;
+        // Skip empty AI placeholder while streaming — TypingIndicator renders below instead
+        if (isLoading && isLast && message.role === "ai" && !message.text && !message.isError) return null;
         const showRetry = isLast && message.role === "ai" && (!!message.isError || !message.text) && !isLoading;
         return (
           <MessageBubble
