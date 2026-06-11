@@ -73,7 +73,8 @@ Phases 1–3 run as a deterministic pipeline. Phases 4–7 run as a **LangGraph 
 
 ```
 Document upload
-  └─ Phase 1: PII detection (regex → NER → LLM filter) → anonymised text stored
+  └─ Phase 1: extract (PyMuPDF→pdfplumber, quality-gated, OCR fallback)
+      → PII detection (regex → NER + noise filter → LLM gate) → anonymised text stored
       └─ Phase 2: RAG chat loop
            ├─ Hybrid retrieval: ChromaDB dense (cosine) + BM25 sparse → RRF merge → BERT reranker
            ├─ Query rewriting: 3 sub-queries per user turn
@@ -109,6 +110,31 @@ Five layers execute in order on every chat turn:
 Document chunks are also scanned at ingestion time (Layer 0 regex) — flagged chunks logged to `guardrail_logs` but ingestion continues.
 
 **System prompt hardening (Phase 2 LLM context):** Retrieved chunks are wrapped in `<chunk index page section>` XML tags inside a `<document_context>` block. System message explicitly instructs the model to treat document content as data only, never as commands.
+
+### PII detection (Phase 1)
+
+Garbage in = garbage out, so quality is enforced at every stage:
+
+1. **Extraction** — PyMuPDF first (honors the font `ToUnicode` table, avoiding
+   ligature/CID corruption like `aWendance`→`attendance`), pdfplumber fallback;
+   the higher-quality extraction per page wins. Pages scoring below
+   `EXTRACTION_QUALITY_THRESHOLD` (mid-word-caps ratio) attempt OCR
+   (`pytesseract`, no-op if the `tesseract` binary is absent).
+2. **Regex pass** — email / phone / SSN (`PII_REGEX_ENABLED`).
+3. **NER pass** — spaCy `en_core_web_sm` over `PII_NER_LABELS` (default
+   `PERSON,ORG,GPE`; narrow to `PERSON` to drop org/place noise). A mechanical
+   filter rejects tech acronyms, vendor names, and mid-word-caps garbage.
+4. **LLM quality gate** — `PII_AUTO_LLM_FILTER` (default on) pre-prunes NER
+   false positives before the PM review screen; the PM can still Undo. Same
+   gate is exposed manually as `make pii-filter ID=<n>`.
+
+Originals are Fernet-encrypted (`PII_ENCRYPTION_KEY`); replacement tokens
+(`[PERSON_1]`) go into the anonymised text. `PII_REVIEW_GATE=true` holds the
+document in `anonymising` until the PM confirms each detection.
+
+> Existing projects don't auto-upgrade — ingestion is cached once detections
+> exist and the collection is `ready`. Re-ingest (clear detections + drop the
+> collection) to apply the new pipeline to an already-processed document.
 
 ### SSE streaming
 
@@ -199,7 +225,8 @@ acuity/
 | LLM providers | `openai` / `google` / `anthropic` — switchable via `MAIN_LLM_PROVIDER` / `FAST_LLM_PROVIDER` env vars |
 | Sparse retrieval | BM25 (`rank-bm25`) merged with dense results via RRF |
 | Reranker | `cross-encoder/ms-marco-MiniLM-L-6-v2` (local, ~500 MB) |
-| PII | regex + spaCy `en_core_web_sm` + LLM quality filter; Fernet encryption (`PII_ENCRYPTION_KEY`) |
+| PDF parsing | PyMuPDF (primary, ToUnicode-aware) + pdfplumber (fallback + tables); optional `pytesseract` OCR |
+| PII | regex + spaCy `en_core_web_sm` (NER noise filter) + auto LLM quality gate; Fernet encryption (`PII_ENCRYPTION_KEY`) |
 | Orchestration | LangGraph + `SqliteSaver` |
 | Sync | GitHub MCP (milestones + issues) via FastMCP; Jira via `atlassian-python-api`; resolved at runtime by `sync_factory.py` |
 | Observability | LangSmith (default) — switchable to Langfuse via `OBSERVABILITY_PROVIDER` |
