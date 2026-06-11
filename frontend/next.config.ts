@@ -1,7 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  // Emit a self-contained .next/standalone server for container/CDN deploys.
+  output: "standalone",
 };
 
 export default nextConfig;

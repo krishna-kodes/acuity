@@ -930,7 +930,9 @@ async def get_workflow():
     global _workflow_instance, _aiosqlite_conn
     if _workflow_instance is None:
         import aiosqlite
-        _aiosqlite_conn = await aiosqlite.connect("./project_state.db")
+
+        from app.config import settings
+        _aiosqlite_conn = await aiosqlite.connect(settings.project_state_db_path)
         checkpointer = AsyncSqliteSaver(_aiosqlite_conn)
         _workflow_instance = _compile_graph(checkpointer)
     return _workflow_instance
