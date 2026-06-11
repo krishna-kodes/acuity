@@ -731,6 +731,77 @@ def get_document_status(
     }
 
 
+@router.get("/projects/{project_id}/document/preview")
+def preview_document(
+    project_id: str,
+    db: Session = Depends(get_db),
+) -> Response:
+    """Serve the REDACTED document text as an inline HTML page for new-tab preview.
+
+    Source priority: the persisted anonymized_path file; fallback reconstructs
+    the redacted text from ChromaDB chunks (for docs ingested before the file
+    was persisted). Never exposes original PII.
+    """
+    import html as _html
+
+    project = _get_project_or_404(project_id, db)
+    doc = (
+        db.query(Document)
+        .filter(Document.project_id == project.id)
+        .order_by(Document.upload_ts.desc())
+        .first()
+    )
+    if not doc:
+        raise HTTPException(status_code=404, detail="No document uploaded for this project.")
+    if doc.status != DocumentStatus.ready:
+        raise HTTPException(status_code=409, detail="Document is still processing.")
+
+    text: str | None = None
+    if doc.anonymized_path and os.path.exists(doc.anonymized_path):
+        try:
+            with open(doc.anonymized_path, encoding="utf-8") as f:
+                text = f.read()
+        except OSError:
+            text = None
+
+    if text is None:
+        # Fallback: reconstruct redacted text from ChromaDB chunks in order.
+        try:
+            from app.services.embedder import get_collection
+
+            col = get_collection(str(project.id))
+            got = col.get(include=["documents", "metadatas"])
+            rows = sorted(
+                zip(got.get("documents") or [], got.get("metadatas") or []),
+                key=lambda r: (r[1] or {}).get("chunk_index", 0),
+            )
+            text = "\n\n".join(d for d, _ in rows if d)
+        except Exception:
+            text = None
+
+    if not text:
+        raise HTTPException(status_code=404, detail="No redacted content available.")
+
+    title = _html.escape(doc.filename or "Document")
+    body = _html.escape(text)
+    page = (
+        "<!doctype html><html><head><meta charset='utf-8'>"
+        f"<title>{title} — redacted preview</title>"
+        "<style>body{margin:0;background:#f6f7f9;color:#1a1a1a;"
+        "font:14px/1.6 ui-sans-serif,system-ui,sans-serif}"
+        ".wrap{max-width:820px;margin:0 auto;padding:32px 24px}"
+        "h1{font-size:15px;font-weight:600;margin:0 0 4px}"
+        ".tag{font-size:11px;color:#6b7280;margin-bottom:20px}"
+        "pre{white-space:pre-wrap;word-wrap:break-word;background:#fff;"
+        "border:1px solid #e5e7eb;border-radius:10px;padding:20px;"
+        "font:13px/1.7 ui-monospace,monospace}</style></head>"
+        f"<body><div class='wrap'><h1>{title}</h1>"
+        "<div class='tag'>Redacted preview — personal data replaced with tokens</div>"
+        f"<pre>{body}</pre></div></body></html>"
+    )
+    return Response(content=page, media_type="text/html")
+
+
 @router.get("/projects/{project_id}/tbds", response_model=list[TBDItem])
 def get_tbds(
     project_id: str,

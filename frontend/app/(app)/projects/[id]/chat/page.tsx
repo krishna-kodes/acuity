@@ -17,6 +17,8 @@ import {
   approveProposal,
   regenerateSection,
   getProposalExportUrl,
+  getDocumentPreviewUrl,
+  getDocumentStatus,
   getChatHistory,
 } from "@/lib/api";
 import type { ProposalData, StructuredSection, SectionStatus, RiskItem, PersonaItem, FeatureItem } from "@/lib/api";
@@ -274,6 +276,14 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
     staleTime: Infinity,
     refetchOnWindowFocus: false,
   });
+
+  // Gate the "Preview doc" button on the document being processed.
+  const { data: docStatus } = useQuery({
+    queryKey: ["document-status", projectId],
+    queryFn: () => getDocumentStatus(projectId),
+    refetchOnWindowFocus: false,
+  });
+  const docReady = docStatus?.status === "ready";
 
   useEffect(() => {
     if (!chatHistory || chatHistory.length === 0) return;
@@ -637,7 +647,25 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
     <div className="flex flex-col h-full overflow-hidden">
       {/* Phase stepper + header — fixed top area */}
       <div className="px-6 pt-6 pb-4 border-b border-border shrink-0">
-        <PhaseProgressStepper phases={getPhasesForRoute("chat")} className="mb-4" />
+        <div className="flex items-start justify-between gap-4 mb-4">
+          <PhaseProgressStepper phases={getPhasesForRoute("chat")} className="flex-1" />
+          <button
+            onClick={() => window.open(getDocumentPreviewUrl(projectId), "_blank", "noopener")}
+            disabled={!docReady}
+            title={docReady ? "Open the redacted document in a new tab" : "Document still processing"}
+            className={cn(
+              "shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border transition-colors",
+              docReady
+                ? "border-border text-foreground hover:bg-card"
+                : "border-border text-text-muted opacity-50 cursor-not-allowed",
+            )}
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 14 14" stroke="currentColor" strokeWidth={2}>
+              <path d="M5 2H2v10h10V9M9 2h3v3M12 2L6 8" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            Preview doc
+          </button>
+        </div>
       </div>
 
       {/* Main content — fills remaining height */}

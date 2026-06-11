@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, use } from "react";
+import { useState, useEffect, useRef, use } from "react";
 import { useRouter } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -49,6 +49,17 @@ export default function RedactionPage({ params }: { params: Promise<{ id: string
   const [llmFiltered, setLlmFiltered] = useState(false);
   const [llmFiltering, setLlmFiltering] = useState(false);
 
+  // Document status — PII detection runs as a background task after upload, so
+  // poll while the doc is still being scanned ("uploaded") and stop once it
+  // reaches "anonymising" (detections committed) or "ready".
+  const { data: docStatus } = useQuery({
+    queryKey: ["document-status", id],
+    queryFn: () => getDocumentStatus(id),
+    refetchInterval: (q) => (q.state.data?.status === "uploaded" ? 1500 : false),
+    refetchOnWindowFocus: false,
+  });
+  const scanning = docStatus?.status === "uploaded";
+
   const { data: rawDetections, isLoading } = useQuery({
     queryKey: ["redaction-decisions", id],
     queryFn: async () => {
@@ -56,7 +67,19 @@ export default function RedactionPage({ params }: { params: Promise<{ id: string
       if (error) throw new Error(String(error));
       return data ?? [];
     },
+    // Keep polling detections while the background scan is in progress.
+    refetchInterval: scanning ? 1500 : false,
   });
+
+  // When the scan finishes (status leaves "uploaded"), pull the final detections once.
+  const prevStatusRef = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    const s = docStatus?.status;
+    if (prevStatusRef.current === "uploaded" && s && s !== "uploaded") {
+      queryClient.invalidateQueries({ queryKey: ["redaction-decisions", id] });
+    }
+    prevStatusRef.current = s;
+  }, [docStatus?.status, id, queryClient]);
 
   // Toast while initial fetch runs
   useEffect(() => {
@@ -88,9 +111,10 @@ export default function RedactionPage({ params }: { params: Promise<{ id: string
     }
   }
 
-  // Auto-trigger LLM filter once data loaded, if NER items exist
+  // Auto-trigger LLM filter once the scan is done and data loaded, if NER items exist.
+  // Wait for scanning to finish so we don't mark filtered before detections arrive.
   useEffect(() => {
-    if (!rawDetections || llmFiltered || llmFiltering) return;
+    if (scanning || !rawDetections || llmFiltered || llmFiltering) return;
     const hasNer = rawDetections.some((d) => d.detection_method === "ner");
     if (hasNer) {
       handleLlmFilter();
@@ -98,7 +122,7 @@ export default function RedactionPage({ params }: { params: Promise<{ id: string
       setLlmFiltered(true);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rawDetections]);
+  }, [rawDetections, scanning]);
 
   const detections: RedactionSpan[] = mapDetections(rawDetections ?? []).map((d) => ({
     ...d,
@@ -178,7 +202,7 @@ export default function RedactionPage({ params }: { params: Promise<{ id: string
     router.push(getNextPhaseRoute("redaction", id));
   }
 
-  const showLoader = isLoading || llmFiltering;
+  const showLoader = isLoading || llmFiltering || scanning;
 
   return (
     <div className="px-6 py-8 max-w-4xl mx-auto flex flex-col gap-6">
@@ -210,7 +234,7 @@ export default function RedactionPage({ params }: { params: Promise<{ id: string
               <path d="M8 2a6 6 0 1 0 6 6" strokeLinecap="round" />
             </svg>
             <p className="text-xs text-text-muted">
-              {isLoading ? "Loading detections…" : "Filtering with AI…"}
+              {scanning ? "Scanning document for personal data…" : isLoading ? "Loading detections…" : "Filtering with AI…"}
             </p>
           </div>
         ) : (

@@ -55,8 +55,8 @@ The app guides a PM through 7 sequential phases. Each phase is gated behind the 
 
 | # | Route | Description |
 |---|-------|-------------|
-| 1 | `/redaction` | PII detection — regex + spaCy NER + LLM quality filter; PM reviews each detection before advancing |
-| 2 | `/chat` | RAG-powered requirements chat with clickable source citations; TBD surfacing (all 4 levels); clarification widget; proposal generation with per-section regeneration |
+| 1 | `/redaction` | PII detection — regex + spaCy NER + LLM quality filter; PM reviews each detection, filterable by status (action items / redacted / kept) and entity type; live scan progress while detection runs |
+| 2 | `/chat` | RAG-powered requirements chat with clickable source citations and a redacted-doc preview; TBD surfacing (all 4 levels); clarification widget; proposal generation with per-section regeneration |
 | 3 | `/modules` | LLM-extracts work modules from proposal; PM can edit, reorder, and label before approving |
 | 4 | `/techstack` | AI tech stack suggestion from the approved-technology list; streams category-by-category via SSE |
 | 5 | `/team` | AI team suggestion matched to skills and availability; effective availability shown (reduced by active-project load); multi-key sort by match score / availability / active projects |
@@ -139,6 +139,18 @@ Garbage in = garbage out, so quality is enforced at every stage:
 Originals are Fernet-encrypted (`PII_ENCRYPTION_KEY`); replacement tokens
 (`[PERSON_1]`) go into the anonymised text. `PII_REVIEW_GATE=true` holds the
 document in `anonymising` until the PM confirms each detection.
+
+**Review UX.** Detection runs as a background task after upload; the redaction
+screen polls while the document is `uploaded` (showing a scan-progress state)
+and renders detections as soon as they land. The list is filterable by status
+(action items / redacted / kept) and by entity type. On confirm, the redacted
+text is persisted (`Document.anonymized_path`) and chunked into ChromaDB.
+
+**Redacted preview.** `GET /projects/{id}/document/preview` serves the redacted
+text as an inline HTML page (the chat page's "Preview doc" button opens it in a
+new tab). Source is `anonymized_path`, with a fallback that reconstructs from the
+ChromaDB chunks (already redacted) for docs ingested before persistence — so it
+never exposes original PII.
 
 > Existing projects don't auto-upgrade — ingestion is cached once detections
 > exist and the collection is `ready`. Re-ingest (clear detections + drop the

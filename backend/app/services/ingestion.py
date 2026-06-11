@@ -77,10 +77,22 @@ async def _chunk_and_embed(
 
     chroma_project_id = str(project_id)
 
+    anonymized_path: str | None = None
     if redacted_text is not None:
         # Replace parsed text with the redacted version
         for page in parsed.pages:
             page.text = redacted_text
+        # Persist the redacted text so the chat-page preview can serve it
+        # without reconstructing from ChromaDB chunks.
+        import os as _os
+
+        _os.makedirs("documents", exist_ok=True)
+        anonymized_path = f"documents/{project_id}_{document_id}_redacted.txt"
+        try:
+            with open(anonymized_path, "w", encoding="utf-8") as _f:
+                _f.write(redacted_text)
+        except OSError:
+            anonymized_path = None
 
     chunks = await chunk_document(
         parsed,
@@ -101,9 +113,10 @@ async def _chunk_and_embed(
 
     stored = await embed_and_store(chunks)
 
-    db.query(Document).filter(Document.id == document_id).update(
-        {"status": DocumentStatus.ready}
-    )
+    _doc_update: dict = {"status": DocumentStatus.ready}
+    if anonymized_path is not None:
+        _doc_update["anonymized_path"] = anonymized_path
+    db.query(Document).filter(Document.id == document_id).update(_doc_update)
     db.query(Project).filter(Project.id == project_id).update(
         {"phase": ProjectPhase.chat}
     )

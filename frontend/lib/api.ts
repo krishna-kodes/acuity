@@ -179,6 +179,9 @@ export const resetDb = () =>
 export const getProposalExportUrl = (projectId: string): string =>
   `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"}/api/v1/projects/${projectId}/export/proposal`
 
+export const getDocumentPreviewUrl = (projectId: string): string =>
+  `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"}/api/v1/projects/${projectId}/document/preview`
+
 export const getEstimateExportUrl = (projectId: string, format: "csv" | "xlsx"): string =>
   `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"}/api/v1/projects/${projectId}/export/estimate?format=${format}`
 
