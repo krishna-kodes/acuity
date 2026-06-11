@@ -126,6 +126,10 @@ def detect_level_1_in_chunks(chunks: list[dict]) -> list[dict]:
         text = chunk.get("text", "")
         for m in _L1_RE.finditer(text):
             sentence = _extract_sentence(text, m.start(), m.end())
+            # Skip if sentence IS the keyword (e.g. a lone "TBD." bullet) — no actionable context
+            bare = sentence.strip().rstrip(".").lower()
+            if bare == m.group().lower() or len(sentence.strip()) < len(m.group()) + 8:
+                continue
             key = sentence.lower().strip()
             if key in seen:
                 continue
@@ -253,6 +257,15 @@ async def detect_level_4(
     ]
 
 
+_BARE_KEYWORDS: frozenset[str] = frozenset(
+    kw.lower()
+    for kw in [
+        "tbd", "todo", "fixme", "n/a", "na", "tbc", "unknown", "unclear",
+        "pending", "not specified", "not yet", "not yet defined",
+    ]
+)
+
+
 def persist_tbds(project_id: int, tbds: list[dict]) -> None:
     from app.database import SessionLocal
     from app.models.clarification import Clarification
@@ -263,6 +276,19 @@ def persist_tbds(project_id: int, tbds: list[dict]) -> None:
 
     db = SessionLocal()
     try:
+        # Prune previously-persisted trivial L1 items (bare keyword, no surrounding context)
+        explicit_rows = (
+            db.query(Clarification)
+              .filter(
+                  Clarification.project_id == project_id,
+                  Clarification.level == TBDLevel.explicit,
+              )
+              .all()
+        )
+        for row in explicit_rows:
+            if row.title.strip().rstrip(".").lower() in _BARE_KEYWORDS:
+                db.delete(row)
+
         existing_titles = {
             row.title
             for row in db.query(Clarification.title)
