@@ -85,6 +85,22 @@ async def retrieve_hybrid(
     return [chunk_map[cid] for cid, _ in top]
 
 
+def _diversify_by_section(chunks: list[dict], max_per_section: int = 3) -> list[dict]:
+    """Cap per-section contribution so one section can't fill all reranker slots.
+
+    Chunks must arrive sorted by RRF score (best first); order preserved.
+    """
+    section_counts: dict[str, int] = {}
+    result = []
+    for chunk in chunks:
+        section = chunk.get("section_hint") or "_unknown"
+        count = section_counts.get(section, 0)
+        if count < max_per_section:
+            result.append(chunk)
+            section_counts[section] = count + 1
+    return result
+
+
 def rerank(query: str, chunks: list[dict], top_n: int = 4) -> tuple[list[dict], list[float]]:
     """Re-rank chunks using a BERT cross-encoder.
 
@@ -115,5 +131,7 @@ async def retrieve(
     top_n = top_n or settings.top_n_rerank
     queries = await rewrite_queries(query, n=settings.query_rewrite_count)
     candidates = await retrieve_hybrid(project_id, queries, top_k)
+    # Cap any single section to max(2, top_n-1) slots so one section can't fill all reranker slots
+    candidates = _diversify_by_section(candidates, max_per_section=max(2, top_n - 1))
     chunks, scores = rerank(query, candidates, top_n)
     return chunks, scores, len(candidates)

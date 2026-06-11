@@ -780,6 +780,21 @@ def get_tbds(
         TBDLevel.missing_section: 3, TBDLevel.contradiction: 4,
     }
 
+    # Prune trivial bare-keyword TBD rows left by older detection runs
+    from app.services.tbd_detection import _BARE_KEYWORDS as _tbd_bare_kw
+    stale = (
+        db.query(Clarification)
+          .filter(Clarification.project_id == pid, Clarification.level == TBDLevel.explicit)
+          .all()
+    )
+    pruned = False
+    for row in stale:
+        if row.title.strip().rstrip(".").lower() in _tbd_bare_kw:
+            db.delete(row)
+            pruned = True
+    if pruned:
+        db.commit()
+
     tbds = (
         db.query(Clarification)
         .filter(Clarification.project_id == pid)
