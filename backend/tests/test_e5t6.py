@@ -1,17 +1,8 @@
 """Tests for E5-T6: real CRUD, factory seed, phase guards, DOCX export."""
 
-import os
-import pytest
-from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
-from app.database import get_db
-from app.main import app
-from app.models.base import Base
 from app.models.enums import ProjectPhase, ProjectStatus
-from app.models.project import Project, Proposal
-
+from app.models.project import Project
 
 # ---------------------------------------------------------------------------
 # Project CRUD

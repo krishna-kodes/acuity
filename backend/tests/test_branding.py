@@ -1,14 +1,15 @@
-import pytest
 from datetime import datetime
+
+import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 import app.models as _models  # noqa: F401 — registers all ORM models
+from app.config import settings
 from app.models.base import Base
 from app.models.branding import BrandingSettings
 from app.services.branding import get_branding
-from app.config import settings
 
 
 @pytest.fixture
@@ -75,6 +76,7 @@ def test_get_branding_falls_back_to_hardcoded_when_env_empty(mem_db, monkeypatch
 
 
 from fastapi.testclient import TestClient
+
 from app.database import get_db
 from app.main import app
 
@@ -157,17 +159,15 @@ def test_put_branding_rejects_invalid_hex(api_client):
 # ---------------------------------------------------------------------------
 
 import os
-import tempfile
-from docx import Document as DocxDocument
+from datetime import datetime as dt
+
+from app.schemas.branding import BrandingSettingsResponse
 from app.services.exporter import (
     ProposalContent,
     ProposalSection,
     _hex_to_rgb,
-    _style_table_header,
     generate_proposal_docx,
 )
-from app.schemas.branding import BrandingSettingsResponse
-from datetime import datetime as dt
 
 
 def test_hex_to_rgb_converts_correctly():

@@ -2,8 +2,8 @@
 
 import time
 import traceback as tb
+from collections.abc import Generator
 from contextlib import contextmanager
-from typing import Generator
 
 from app.config import settings
 

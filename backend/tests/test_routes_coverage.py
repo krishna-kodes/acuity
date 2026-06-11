@@ -8,11 +8,12 @@ Covers:
 """
 
 import json
-import pytest
 from unittest.mock import MagicMock, patch
+
+import pytest
+
 from app.models.enums import ProjectPhase, ProjectStatus
 from app.models.project import Project, Proposal
-
 
 # ---------------------------------------------------------------------------
 # GET /projects — list all
@@ -162,8 +163,9 @@ def test_missing_project_returns_404(client, path):
 def _seed_epic_and_task(db_session, project_id: str):
     """Helper: create one Epic + one Task for export tests."""
     import json
-    from app.models.sync import Epic, Task
+
     from app.models.enums import SyncStatus
+    from app.models.sync import Epic, Task
 
     epic = Epic(
         project_id=int(project_id),

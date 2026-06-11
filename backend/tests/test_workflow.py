@@ -1,19 +1,18 @@
 """Tests for E5-T3: LangGraph workflow, ProjectState, phase guard, retry, LLM factory."""
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from app.services.workflow import (
-    ProjectState,
     _EMPTY_STATE,
-    _require_phase_complete,
-    with_retry,
+    ProjectState,
     _phase_2_chat_node,
     _phase_3_stack_node,
+    _require_phase_complete,
+    with_retry,
 )
-
 
 # ---------------------------------------------------------------------------
 # ProjectState shape
@@ -134,7 +133,6 @@ async def test_phase_2_chat_node_raises_409_when_phase_1_incomplete():
 
 @pytest.mark.asyncio
 async def test_phase_3_stack_node_returns_tech_stack():
-    from unittest.mock import MagicMock
 
     mock_db = MagicMock()
     mock_db.query.return_value.all.return_value = []
@@ -163,7 +161,7 @@ async def test_phase_3_stack_node_raises_when_phase_2_incomplete():
 
 @pytest.mark.asyncio
 async def test_phase_3_stack_node_logs_error_on_llm_failure():
-    from unittest.mock import patch, MagicMock
+    from unittest.mock import patch
 
     state: ProjectState = {
         **_EMPTY_STATE,
@@ -199,6 +197,7 @@ async def test_phase_3_stack_node_logs_error_on_llm_failure():
 
 def test_llm_factory_google():
     from unittest.mock import patch
+
     from app.services.llm_factory import get_llm
 
     with patch("app.config.settings") as mock_settings:
@@ -216,6 +215,7 @@ def test_llm_factory_google():
 
 def test_llm_factory_anthropic():
     from unittest.mock import patch
+
     from app.services.llm_factory import get_llm
 
     with patch("app.config.settings") as mock_settings:
@@ -233,6 +233,7 @@ def test_llm_factory_anthropic():
 
 def test_llm_factory_unknown_provider_raises():
     from unittest.mock import patch
+
     from app.services.llm_factory import get_llm
 
     with patch("app.config.settings") as mock_settings:
@@ -252,8 +253,9 @@ def test_llm_factory_unknown_provider_raises():
 
 def test_build_workflow_returns_compiled_graph():
     import sqlite3 as _sqlite3
-    from langgraph.checkpoint.sqlite import SqliteSaver
+
     from langgraph.graph.state import CompiledStateGraph
+
     import app.services.workflow as wf_module
 
     # build_workflow() doesn't call get_llm — LLM is lazy-loaded inside node functions.

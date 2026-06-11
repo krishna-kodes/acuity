@@ -102,8 +102,8 @@ async def _chunk_and_embed(
     )
 
     if settings.prompt_injection_detection_enabled:
-        from app.guardrails.prompt_injection import scan as _inj_scan
         from app.guardrails import log_guardrail as _log_guardrail
+        from app.guardrails.prompt_injection import scan as _inj_scan
         flagged = [c for c in chunks if _inj_scan(c.text).detected]
         if flagged:
             _log_guardrail(
@@ -142,7 +142,7 @@ async def detect_and_stage_pii(
     If pii_review_gate=False → auto-confirms all detections and proceeds.
     If pii_review_gate=True → stops here; PM must call complete_ingestion() after review.
     """
-    from app.services.embedder import collection_exists, get_collection, delete_collection
+    from app.services.embedder import collection_exists, delete_collection, get_collection
 
     chroma_project_id = str(project_id)
 

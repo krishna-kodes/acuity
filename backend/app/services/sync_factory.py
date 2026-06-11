@@ -4,7 +4,7 @@ Per-project sync_config is deserialized through SyncConfigRequest (Pydantic).
 Falls back to settings.sync_provider when project.sync_provider is None.
 """
 
-from typing import Callable
+from collections.abc import Callable
 
 from app.config import settings
 from app.models.project import Project
