@@ -121,11 +121,18 @@ async def classify_llm(text: str, project_id: str) -> InjectionResult:
 
     from app.guardrails import log_guardrail
     from app.services.llm_factory import get_llm
+    from app.services.metrics_tracker import calc_cost, record_tokens
 
-    llm = get_llm(fast=True).with_structured_output(_LLMResult)
-    result: _LLMResult = await llm.with_config({"run_name": "injection_classifier"}).ainvoke(
+    llm = get_llm(fast=True).with_structured_output(_LLMResult, include_raw=True)
+    raw_result: dict = await llm.with_config({"run_name": "injection_classifier"}).ainvoke(
         [HumanMessage(content=_LLM_PROMPT.format(message=text))]
     )
+    result: _LLMResult = raw_result["parsed"]
+
+    _usage = getattr(raw_result.get("raw"), "usage_metadata", None) or {}
+    _inp = int(_usage.get("input_tokens", 0))
+    _out = int(_usage.get("output_tokens", 0))
+    record_tokens(int(project_id), "phase_2", settings.fast_llm_model, _inp, _out, calc_cost(_inp, _out))
 
     if result.is_injection and result.confidence >= settings.injection_llm_confidence_threshold:
         log_guardrail(project_id, 0, "injection_detected_llm", result.confidence,
