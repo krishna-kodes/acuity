@@ -304,6 +304,11 @@ async def _chat_turn_node(state: ProjectState) -> dict[str, Any]:
     from app.guardrails.retrieval_gate import evaluate as _gate_evaluate
     _gate = _gate_evaluate(chunks, project_id, list(reranker_scores))
     if _gate.status != "pass":
+        # Persist a placeholder AI response so chat_messages always alternates
+        # user/assistant. Without this, consecutive user messages accumulate in
+        # state and break the LLM message sequence on subsequent turns.
+        _blocked_reply = _gate.message or "I couldn't find relevant information in the document for this query."
+        messages.append({"role": "assistant", "content": _blocked_reply})
         return {
             "chat_messages": messages,
             "tbd_items": list(state.get("tbd_items") or []),
@@ -363,12 +368,23 @@ async def _chat_turn_node(state: ProjectState) -> dict[str, Any]:
         f"{context}\n"
         "</document_context>"
     )
+    # Build alternating human/AI message sequence. Defensive: drop orphaned user
+    # messages (consecutive human messages without an AI response between them)
+    # that may exist in state from pre-fix gate_blocked turns.
+    filtered_messages: list[dict] = []
+    for m in messages:
+        if m["role"] == "user" and filtered_messages and filtered_messages[-1]["role"] == "user":
+            # Replace the previous orphaned user message with this one
+            filtered_messages[-1] = m
+        else:
+            filtered_messages.append(m)
+
     lc_messages = [
         SystemMessage(content=_system_content),
         *[
             HumanMessage(content=m["content"]) if m["role"] == "user"
             else AIMessage(content=m["content"])
-            for m in messages
+            for m in filtered_messages
         ],
     ]
     import time as _time
