@@ -88,6 +88,17 @@ async def _chunk_and_embed(
         min_tokens=settings.chunk_size_min_tokens,
         max_tokens=settings.chunk_size_max_tokens,
     )
+
+    if settings.prompt_injection_detection_enabled:
+        from app.guardrails.prompt_injection import scan as _inj_scan
+        from app.guardrails import log_guardrail as _log_guardrail
+        flagged = [c for c in chunks if _inj_scan(c.text).detected]
+        if flagged:
+            _log_guardrail(
+                str(project_id), 1, "injection_in_document", None,
+                {"flagged_chunks": len(flagged), "total_chunks": len(chunks)},
+            )
+
     stored = await embed_and_store(chunks)
 
     db.query(Document).filter(Document.id == document_id).update(

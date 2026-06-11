@@ -95,12 +95,19 @@ Document upload
 
 ### Guardrails (Phase 2)
 
-| Guardrail | Trigger | Behaviour |
-|-----------|---------|-----------|
-| Domain classifier | Every chat turn | LLM classifies query as `pm_relevant` / `off_topic`; rejects off-topic before retrieval (flag: `DOMAIN_CLASSIFIER_ENABLED`) |
-| Retrieval gate | After retrieval | Sigmoid confidence score on retrieved chunks; blocks low-confidence sets before LLM inference (flag: `RETRIEVAL_GATE_ENABLED`) |
-| Groundedness check | After LLM response | LLM-as-judge scores all claims against retrieved context; flags unsupported claims (flag: `GROUNDEDNESS_CHECK_ENABLED`) |
-| Prompt injection detection | Upload + chat | Regex scan for injection patterns (flag: `PROMPT_INJECTION_DETECTION`) |
+Five layers execute in order on every chat turn:
+
+| Layer | Guardrail | Trigger | Behaviour |
+|-------|-----------|---------|-----------|
+| 0 | **Prompt injection detection** | Before retrieval | Two-pass: (1) regex (29 patterns, unicode-normalised, zero-width stripped) then (2) LLM semantic classifier catches synonym/indirect/encoded bypasses. Blocks on either hit. Flag: `PROMPT_INJECTION_DETECTION_ENABLED`. Threshold: `INJECTION_LLM_CONFIDENCE_THRESHOLD` (default 0.80) |
+| 1 | **Domain classifier** | Before retrieval | LLM classifies query; rejects clearly off-topic before retrieval. Flag: `DOMAIN_CLASSIFIER_ENABLED` |
+| 2 | **Retrieval gate** | After retrieval | Empty retrieval always blocked (regardless of flag). When `RETRIEVAL_GATE_ENABLED=true`: also checks sigmoid confidence score and chunk provenance |
+| 3 | **Groundedness check** | After LLM response | LLM-as-judge scores all claims against retrieved context; flags unsupported claims. Flag: `GROUNDEDNESS_CHECK_ENABLED` |
+| 4 | **Output monitor** | After LLM response | Detects canary token leak (system prompt exfiltration). Runtime token embedded in system message; response checked before streaming. Flag: `OUTPUT_MONITOR_ENABLED`. Token: `PROMPT_CANARY_TOKEN` (auto-generated per process if unset) |
+
+Document chunks are also scanned at ingestion time (Layer 0 regex) — flagged chunks logged to `guardrail_logs` but ingestion continues.
+
+**System prompt hardening (Phase 2 LLM context):** Retrieved chunks are wrapped in `<chunk index page section>` XML tags inside a `<document_context>` block. System message explicitly instructs the model to treat document content as data only, never as commands.
 
 ### SSE streaming
 

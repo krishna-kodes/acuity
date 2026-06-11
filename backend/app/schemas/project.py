@@ -53,6 +53,9 @@ class TBDItem(BaseModel):
     level: int
     resolved: bool
     status: str = "open"
+    source_sentence: str | None = None   # sentence/excerpt from document
+    source_section: str | None = None    # section name (section_hint)
+    source_page: int | None = None       # page number
 
 
 class TechStackResponse(BaseModel):

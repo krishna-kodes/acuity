@@ -793,6 +793,9 @@ def get_tbds(
             level=_tbd_level_int.get(t.level, 1),
             resolved=t.status != TBDStatus.open,
             status=t.status.value if hasattr(t.status, "value") else str(t.status),
+            source_sentence=t.source_sentence,
+            source_section=t.source_section or None,
+            source_page=t.source_page,
         )
         for t in tbds
     ]
@@ -2590,6 +2593,21 @@ async def chat(
         "phase_status": existing.values.get("phase_status") or {"phase_1": "complete"},
     }
 
+    # Layer 0: prompt injection — regex (fast) then LLM semantic (catches obfuscation/synonyms)
+    from app.config import settings as _cfg_inj
+    if _cfg_inj.prompt_injection_detection_enabled:
+        from app.guardrails.prompt_injection import classify_llm as _inj_llm
+        from app.guardrails.prompt_injection import scan as _inj_scan
+        from app.guardrails import log_guardrail as _log_guardrail
+        _inj = _inj_scan(body.message)
+        if not _inj.detected:
+            _inj = await _inj_llm(body.message, project_id)
+        if _inj.detected:
+            if _inj.pattern != "llm_semantic":  # llm path logs inside classify_llm
+                _log_guardrail(project_id, 0, "injection_detected", None,
+                               {"pattern": _inj.pattern, "matched": _inj.matched_text})
+            raise HTTPException(status_code=400, detail="Message contains disallowed content.")
+
     # Layer 1: domain classification — raises HTTP 400 if clearly non-PM with high confidence
     from app.guardrails.domain_classifier import classify as _domain_classify
     await _domain_classify(body.message, project_id)
@@ -2618,6 +2636,9 @@ async def chat(
                     if tbds := output.get("tbd_items"):
                         yield f"data: {json.dumps({'type': 'tbds', 'items': tbds})}\n\n"
 
+                    if sources := output.get("retrieved_sources"):
+                        yield f"data: {json.dumps({'type': 'sources', 'items': sources})}\n\n"
+
                     # Layer 3: groundedness events
                     gs = output.get("groundedness_score")
                     if gs is not None:
@@ -2626,6 +2647,10 @@ async def chat(
                         yield f"data: {json.dumps({'type': 'groundedness', 'score': gs, 'flagged': flagged})}\n\n"
                         if flagged:
                             yield f"data: {json.dumps({'type': 'groundedness_warning', 'score': gs, 'unsupported_claims': output.get('groundedness_unsupported_claims') or [], 'reasoning': output.get('groundedness_reasoning') or '', 'source': 'general_knowledge' if output.get('groundedness_unsupported_claims') else None})}\n\n"
+
+                    # Layer 4: canary token leak — possible system prompt exfiltration
+                    if output.get("canary_leaked"):
+                        yield f"data: {json.dumps({'type': 'canary_leaked', 'message': 'Possible system prompt exfiltration detected. Response has been flagged.'})}\n\n"
 
             yield f"data: {json.dumps({'type': 'done'})}\n\n"
         except Exception as e:

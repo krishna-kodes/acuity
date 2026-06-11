@@ -1,8 +1,16 @@
+"use client";
+
+import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
 
 export type MessageRole = "ai" | "pm";
+
+export interface ChatSource {
+  section_hint: string;
+  page_number?: number | null;
+}
 
 export interface GroundednessWarning {
   score: number;
@@ -18,12 +26,17 @@ export interface ChatMessage {
   timestamp?: string;
   confidenceScore?: number | null;
   groundednessWarning?: GroundednessWarning | null;
+  isError?: boolean;
+  sources?: ChatSource[];
 }
 
 interface ChatThreadProps {
   messages: ChatMessage[];
   isLoading?: boolean;
   className?: string;
+  onRetry?: () => void;
+  suggestedReplies?: string[];
+  onSuggestionClick?: (text: string) => void;
 }
 
 function AIAvatar() {
@@ -95,7 +108,47 @@ function GroundednessWarningBanner({ warning }: { warning: GroundednessWarning }
   );
 }
 
-function MessageBubble({ message }: { message: ChatMessage }) {
+function SourcesCollapsible({ sources }: { sources: ChatSource[] }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="mt-1">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-1 text-[11px] text-text-muted hover:text-foreground transition-colors"
+      >
+        <svg
+          className={cn("w-3 h-3 transition-transform", open && "rotate-90")}
+          fill="none" viewBox="0 0 12 12" stroke="currentColor" strokeWidth={2}
+        >
+          <path d="M4 2l4 4-4 4" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+        {sources.length} source{sources.length !== 1 ? "s" : ""}
+      </button>
+      {open && (
+        <div className="mt-1.5 space-y-1 pl-3 border-l-2 border-border">
+          {sources.map((s, i) => (
+            <div key={i} className="text-[11px] text-text-muted leading-snug">
+              <span className="text-foreground">{s.section_hint || "Untitled section"}</span>
+              {s.page_number != null && (
+                <span className="ml-1.5 opacity-60">p.{s.page_number}</span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MessageBubble({
+  message,
+  showRetry,
+  onRetry,
+}: {
+  message: ChatMessage;
+  showRetry?: boolean;
+  onRetry?: () => void;
+}) {
   const isAI = message.role === "ai";
 
   return (
@@ -117,34 +170,44 @@ function MessageBubble({ message }: { message: ChatMessage }) {
           className={cn(
             "px-3.5 py-2.5 text-sm leading-relaxed",
             isAI
-              ? "bg-card border border-border text-foreground rounded-xl rounded-tl-sm"
+              ? cn(
+                  "bg-card border text-foreground rounded-xl rounded-tl-sm",
+                  message.isError ? "border-destructive/40" : "border-border",
+                )
               : "bg-primary text-primary-foreground rounded-xl rounded-tr-sm"
           )}
         >
           {isAI ? (
-            <ReactMarkdown
-              remarkPlugins={[remarkGfm]}
-              components={{
-                p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
-                h1: ({ children }) => <h1 className="text-base font-semibold mb-1 mt-2 first:mt-0">{children}</h1>,
-                h2: ({ children }) => <h2 className="text-sm font-semibold mb-1 mt-2 first:mt-0">{children}</h2>,
-                h3: ({ children }) => <h3 className="text-sm font-semibold mb-1 mt-2 first:mt-0">{children}</h3>,
-                ul: ({ children }) => <ul className="list-disc pl-4 mb-2 space-y-0.5">{children}</ul>,
-                ol: ({ children }) => <ol className="list-decimal pl-4 mb-2 space-y-0.5">{children}</ol>,
-                li: ({ children }) => <li className="text-sm">{children}</li>,
-                strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
-                code: ({ children }) => <code className="bg-surface-subtle px-1 py-0.5 rounded text-xs font-mono">{children}</code>,
-                hr: () => <hr className="border-border my-2" />,
-              }}
-            >
-              {message.text}
-            </ReactMarkdown>
+            message.text ? (
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                components={{
+                  p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+                  h1: ({ children }) => <h1 className="text-base font-semibold mb-1 mt-2 first:mt-0">{children}</h1>,
+                  h2: ({ children }) => <h2 className="text-sm font-semibold mb-1 mt-2 first:mt-0">{children}</h2>,
+                  h3: ({ children }) => <h3 className="text-sm font-semibold mb-1 mt-2 first:mt-0">{children}</h3>,
+                  ul: ({ children }) => <ul className="list-disc pl-4 mb-2 space-y-0.5">{children}</ul>,
+                  ol: ({ children }) => <ol className="list-decimal pl-4 mb-2 space-y-0.5">{children}</ol>,
+                  li: ({ children }) => <li className="text-sm">{children}</li>,
+                  strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
+                  code: ({ children }) => <code className="bg-surface-subtle px-1 py-0.5 rounded text-xs font-mono">{children}</code>,
+                  hr: () => <hr className="border-border my-2" />,
+                }}
+              >
+                {message.text}
+              </ReactMarkdown>
+            ) : (
+              <span className="text-text-muted text-xs italic">No response received.</span>
+            )
           ) : (
             message.text
           )}
         </div>
         {isAI && message.groundednessWarning && (
           <GroundednessWarningBanner warning={message.groundednessWarning} />
+        )}
+        {isAI && message.sources && message.sources.length > 0 && (
+          <SourcesCollapsible sources={message.sources} />
         )}
         <div className="flex items-center gap-1.5 px-1">
           {message.timestamp && (
@@ -155,13 +218,32 @@ function MessageBubble({ message }: { message: ChatMessage }) {
           {isAI && message.confidenceScore != null && (
             <ConfidenceBadge score={message.confidenceScore} />
           )}
+          {showRetry && onRetry && (
+            <button
+              onClick={onRetry}
+              className="flex items-center gap-1 text-[11px] text-text-muted hover:text-primary transition-colors"
+            >
+              <svg className="w-3 h-3" fill="none" viewBox="0 0 12 12" stroke="currentColor" strokeWidth={2}>
+                <path d="M10 6A4 4 0 1 1 6 2" strokeLinecap="round" />
+                <path d="M6 2l2 2-2 2" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              Retry
+            </button>
+          )}
         </div>
       </div>
     </div>
   );
 }
 
-export function ChatThread({ messages, isLoading, className }: ChatThreadProps) {
+export function ChatThread({
+  messages,
+  isLoading,
+  className,
+  onRetry,
+  suggestedReplies,
+  onSuggestionClick,
+}: ChatThreadProps) {
   return (
     <div className={cn("flex flex-col gap-4 py-4 px-4 overflow-y-auto", className)}>
       {messages.length === 0 && !isLoading && (
@@ -175,9 +257,32 @@ export function ChatThread({ messages, isLoading, className }: ChatThreadProps) 
         </div>
       )}
 
-      {messages.map((message) => (
-        <MessageBubble key={message.id} message={message} />
-      ))}
+      {messages.map((message, i) => {
+        const isLast = i === messages.length - 1;
+        const showRetry = isLast && message.role === "ai" && (!!message.isError || !message.text) && !isLoading;
+        return (
+          <MessageBubble
+            key={message.id}
+            message={message}
+            showRetry={showRetry}
+            onRetry={onRetry}
+          />
+        );
+      })}
+
+      {!isLoading && suggestedReplies && suggestedReplies.length > 0 && (
+        <div className="flex flex-wrap gap-2 pl-9">
+          {suggestedReplies.map((reply) => (
+            <button
+              key={reply}
+              onClick={() => onSuggestionClick?.(reply)}
+              className="text-xs px-3 py-1.5 rounded-full border border-primary/30 text-primary bg-primary/5 hover:bg-primary/10 transition-colors"
+            >
+              {reply}
+            </button>
+          ))}
+        </div>
+      )}
 
       {isLoading && <TypingIndicator />}
     </div>

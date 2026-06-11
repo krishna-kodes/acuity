@@ -1,4 +1,10 @@
+import secrets
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Generated once per server process — unknown to attackers during a session.
+# Override with PROMPT_CANARY_TOKEN in .env for persistence across restarts.
+_RUNTIME_CANARY = secrets.token_hex(10)
 
 
 class Settings(BaseSettings):
@@ -43,6 +49,10 @@ class Settings(BaseSettings):
     domain_classifier_enabled: bool = True
     domain_classifier_confidence_threshold: float = 0.85
 
+    prompt_injection_detection_enabled: bool = True
+    injection_llm_confidence_threshold: float = 0.80
+    prompt_canary_token: str = _RUNTIME_CANARY
+    output_monitor_enabled: bool = True
     retrieval_gate_enabled: bool = False
     retrieval_confidence_threshold: float = 0.2
     
