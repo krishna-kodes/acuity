@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useCallback } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
@@ -263,6 +264,16 @@ export default function NewProjectPage() {
               to try the workflow. Please avoid uploading random documents.
             </p>
           </div>
+
+          <Link
+            href="/admin/branding"
+            className="flex items-center gap-1.5 mt-1 text-[11px] text-primary font-medium hover:text-accent-hover transition-colors"
+          >
+            <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 14 14" stroke="currentColor" strokeWidth={2}>
+              <path d="M2 5l5-3 5 3v4l-5 3-5-3V5z" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            Click here to set your custom branding for generated documents
+          </Link>
         </div>
 
         {/* Error */}
