@@ -1,8 +1,18 @@
 import createClient from "openapi-fetch"
 import type { paths } from "./api.types"
 
+// Normalised API base. NEXT_PUBLIC_API_URL is inlined at build time; if it's
+// set without a scheme (e.g. "host.up.railway.app") the browser treats it as a
+// relative path and appends it to the current origin — prepend https:// to
+// avoid that. Trailing slash stripped so `${base}/api/...` never doubles up.
+export const _apiBase = (): string => {
+  const raw = (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000").trim()
+  const withScheme = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`
+  return withScheme.replace(/\/+$/, "")
+}
+
 export const apiClient = createClient<paths>({
-  baseUrl: process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000",
+  baseUrl: _apiBase(),
 })
 
 // ── Projects ────────────────────────────────────────────────────────────────
@@ -43,7 +53,7 @@ export interface StoredChatMessage {
 }
 
 export const getChatHistory = async (projectId: string): Promise<StoredChatMessage[]> => {
-  const base = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+  const base = _apiBase();
   const res = await fetch(`${base}/api/v1/projects/${projectId}/chat-history`);
   if (!res.ok) return [];
   return res.json();
@@ -177,17 +187,15 @@ export const resetDb = () =>
 // ── DOCX export (binary — use URL directly) ───────────────────────────────────
 
 export const getProposalExportUrl = (projectId: string): string =>
-  `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"}/api/v1/projects/${projectId}/export/proposal`
+  `${_apiBase()}/api/v1/projects/${projectId}/export/proposal`
 
 export const getDocumentPreviewUrl = (projectId: string): string =>
-  `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"}/api/v1/projects/${projectId}/document/preview`
+  `${_apiBase()}/api/v1/projects/${projectId}/document/preview`
 
 export const getEstimateExportUrl = (projectId: string, format: "csv" | "xlsx"): string =>
-  `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"}/api/v1/projects/${projectId}/export/estimate?format=${format}`
+  `${_apiBase()}/api/v1/projects/${projectId}/export/estimate?format=${format}`
 
 // ── New phase endpoints (not yet in api.types — use raw fetch) ────────────────
-
-export const _apiBase = () => process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"
 
 export type ProjectDetail = {
   id: string

@@ -20,6 +20,7 @@ import {
   getDocumentPreviewUrl,
   getDocumentStatus,
   getChatHistory,
+  _apiBase,
 } from "@/lib/api";
 import type { ProposalData, StructuredSection, SectionStatus, RiskItem, PersonaItem, FeatureItem } from "@/lib/api";
 import type { ChatMessage, ChatSource } from "@/components/chat-thread";
@@ -316,7 +317,7 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
     setMessages([{ id: aiId, role: "ai", text: "", timestamp: ts }]);
     setIsLoading(true);
 
-    const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+    const apiBase = _apiBase();
     fetch(`${apiBase}/api/v1/projects/${projectId}/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -415,7 +416,7 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
     setMessages((prev) => [...prev, { id: aiId, role: "ai" as const, text: "", timestamp: ts }]);
 
     try {
-      const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+      const apiBase = _apiBase();
       const response = await fetch(
         `${apiBase}/api/v1/projects/${projectId}/chat`,
         {

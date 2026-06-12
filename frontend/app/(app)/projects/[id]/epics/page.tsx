@@ -16,6 +16,7 @@ import {
   getSyncConfig,
   updateSyncConfig,
   getEstimateExportUrl,
+  _apiBase,
 } from "@/lib/api";
 import type { SyncProvider, SyncConfig, SyncConfigResponse } from "@/lib/api";
 
@@ -333,7 +334,7 @@ export default function EpicsPage({ params }: { params: Promise<{ id: string }> 
     setSyncState("syncing");
     setSyncError(null);
     try {
-      const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+      const apiBase = _apiBase();
       const selectedIds = epics.filter((e) => e.selected).map((e) => Number(e.id));
       const res = await fetch(`${apiBase}/api/v1/projects/${id}/sync`, {
         method: "POST",

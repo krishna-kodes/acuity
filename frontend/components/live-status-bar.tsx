@@ -2,8 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
-
-const _apiBase = () => process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+import { _apiBase } from "@/lib/api";
 
 interface LiveStatusBarProps {
   projectId: string;

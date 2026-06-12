@@ -2,6 +2,7 @@
 
 A PM uploads a requirements document (PDF/DOCX), refines it through an AI chat interface, extracts structured work modules, receives team and tech stack suggestions with effort estimates, then syncs generated epics/tasks to GitHub or Jira.
 
+Try it : https://acuity-sooty.vercel.app/ 
 ---
 
 ## Prerequisites

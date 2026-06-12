@@ -2,10 +2,10 @@
 
 import { use, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { listProjectDocuments, deleteDocument, deleteProposal } from "@/lib/api";
+import { listProjectDocuments, deleteDocument, deleteProposal, _apiBase } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
-const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+const apiBase = _apiBase();
 
 function formatBytes(bytes: number | null): string {
   if (bytes === null) return "—";
