@@ -244,6 +244,25 @@ export default function NewProjectPage() {
             Requirements document <span className="text-destructive">*</span>
           </span>
           <Dropzone file={file} error={fileError} onFile={handleFile} />
+
+          {/* Sample doc for quick demo */}
+          <div className="flex items-start gap-2 mt-1 p-2.5 rounded-md bg-accent-subtle/40 border border-border">
+            <svg className="w-3.5 h-3.5 text-primary shrink-0 mt-0.5" fill="none" viewBox="0 0 14 14" stroke="currentColor" strokeWidth={2}>
+              <circle cx="7" cy="7" r="6" />
+              <path d="M7 6.5v3.5M7 4v.5" strokeLinecap="round" />
+            </svg>
+            <p className="text-[11px] text-text-secondary leading-relaxed">
+              No requirements document?{" "}
+              <a
+                href="/samples/sample-requirements.pdf"
+                download
+                className="text-primary font-medium underline underline-offset-2 hover:text-accent-hover"
+              >
+                Download a sample
+              </a>{" "}
+              to try the workflow. Please avoid uploading random documents.
+            </p>
+          </div>
         </div>
 
         {/* Error */}
