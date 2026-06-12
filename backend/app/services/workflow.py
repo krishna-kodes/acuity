@@ -939,9 +939,14 @@ async def get_workflow():
     """Return the module-level compiled workflow (lazy async singleton)."""
     global _workflow_instance, _aiosqlite_conn
     if _workflow_instance is None:
+        import os
+
         import aiosqlite
 
         from app.config import settings
+        _ckpt_parent = os.path.dirname(os.path.abspath(settings.project_state_db_path))
+        if _ckpt_parent:
+            os.makedirs(_ckpt_parent, exist_ok=True)
         _aiosqlite_conn = await aiosqlite.connect(settings.project_state_db_path)
         checkpointer = AsyncSqliteSaver(_aiosqlite_conn)
         _workflow_instance = _compile_graph(checkpointer)

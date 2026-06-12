@@ -6,6 +6,7 @@ from alembic import context
 
 # Import all models so autogenerate sees every table
 from app.config import settings
+from app.database import ensure_sqlite_dir
 from app.models import Base  # noqa: F401 — side-effect import registers all tables
 
 config = context.config
@@ -14,6 +15,9 @@ config = context.config
 # persistent volume (sqlite:////data/app.db); locally it defaults to the ini
 # value (sqlite:///./app.db). Override the ini URL so the two never diverge.
 config.set_main_option("sqlalchemy.url", settings.app_db_path)
+# Create the DB's parent dir so the first `alembic upgrade` doesn't fail with
+# "unable to open database file" on a fresh volume.
+ensure_sqlite_dir(settings.app_db_path)
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
