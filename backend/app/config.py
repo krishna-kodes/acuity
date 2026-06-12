@@ -41,7 +41,7 @@ class Settings(BaseSettings):
     # Set EXPOSE_FACTORY_IN_DOCS=false in deploy to hide them from /docs. They
     # remain callable (this only hides the schema), so treat as cosmetic, not
     # access control.
-    expose_factory_in_docs: bool = True
+    expose_factory_in_docs: bool = False
     # SQLAlchemy URL for the application DB. Override APP_DB_PATH in deploy to
     # point at a persistent volume, e.g. sqlite:////data/app.db.
     app_db_path: str = "sqlite:///./app.db"
