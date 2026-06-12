@@ -32,6 +32,16 @@ class Settings(BaseSettings):
     branding_prepared_by: str = ""
     embedding_dimensions: int = 1536
     chroma_persist_path: str = "./chroma_db"
+    # HTTP Basic auth for Swagger/OpenAPI. When DOCS_PASSWORD is set, /docs,
+    # /redoc and /openapi.json require these credentials; left blank, docs are
+    # open (local dev convenience).
+    docs_username: str = "admin"
+    docs_password: str = "Acuity@1234"
+    # Show the destructive factory (seed / reset-db) routes in Swagger/OpenAPI.
+    # Set EXPOSE_FACTORY_IN_DOCS=false in deploy to hide them from /docs. They
+    # remain callable (this only hides the schema), so treat as cosmetic, not
+    # access control.
+    expose_factory_in_docs: bool = True
     # SQLAlchemy URL for the application DB. Override APP_DB_PATH in deploy to
     # point at a persistent volume, e.g. sqlite:////data/app.db.
     app_db_path: str = "sqlite:///./app.db"
