@@ -257,7 +257,7 @@ export function RedactionHighlight({
   className,
 }: RedactionHighlightProps) {
   const [selected, setSelected] = useState<Set<number>>(new Set());
-  const [statusFilter, setStatusFilter] = useState<"all" | "pending" | "redacted" | "kept">("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | "pending" | "redacted" | "kept">("pending");
   const [typeFilter, setTypeFilter] = useState<Set<string>>(new Set());
 
   // Entity types present, sorted for a stable filter bar.
