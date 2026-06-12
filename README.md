@@ -319,6 +319,7 @@ and insert only real data.
 ## API surface (all routes prefixed `/api/v1/`)
 
 OpenAPI docs at `http://localhost:8000/docs` when server is running.
+Live - https://acuity-production-50c6.up.railway.app/docs
 
 ---
 

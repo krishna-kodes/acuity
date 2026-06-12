@@ -272,18 +272,6 @@ function ProfileMenu() {
       </button>
       {open && (
         <div className="absolute bottom-full left-2 right-2 mb-1 z-50 bg-card border border-border rounded-lg shadow-md overflow-hidden">
-          <button
-            className="w-full text-left px-3 py-2 text-sm text-foreground hover:bg-surface-subtle transition-colors"
-            onClick={() => setOpen(false)}
-          >
-            Your profile
-          </button>
-          <button
-            className="w-full text-left px-3 py-2 text-sm text-foreground hover:bg-surface-subtle transition-colors"
-            onClick={() => setOpen(false)}
-          >
-            Settings
-          </button>
           <Link
             href="/admin/employees"
             onClick={() => setOpen(false)}
