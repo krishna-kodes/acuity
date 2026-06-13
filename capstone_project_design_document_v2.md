@@ -108,9 +108,9 @@ Phase transitions are **PM-initiated** ("Proceed" button). Phase N cannot start 
 | Backend | REST API, agent orchestration | FastAPI + Uvicorn |
 | Vector Store | Chunk storage and retrieval | ChromaDB `PersistentClient` behind `VectorStoreAdapter` |
 | Relational Store | Session state, project metadata, historical data | SQLite + SQLAlchemy + Alembic (WAL mode) |
-| LLM (main) | Inference | Gemini 2.5 Pro via `google-genai` SDK (`langchain-google-genai`) — switchable via `MAIN_LLM_PROVIDER` |
-| LLM (fast) | Query rewriting, LLM-as-judge | Gemini 2.5 Flash — switchable via `FAST_LLM_PROVIDER` |
-| LLM (structured) | Estimation + epic generation | Claude Sonnet (Phases 5–6, optional) |
+| LLM (main) | Inference | `gpt-5.4-mini` (OpenAI) via `langchain-openai` — switchable via `MAIN_LLM_PROVIDER` |
+| LLM (fast) | Query rewriting, LLM-as-judge | `gpt-5.4-nano` (OpenAI) — switchable via `FAST_LLM_PROVIDER` |
+| LLM (structured) | Estimation + epic generation | `gpt-5.4-mini` (OpenAI, Phases 5–6) |
 | LLM Factory | Provider abstraction | LangChain factory pattern — env-var driven |
 | Reranker | Cross-encoder reranking | `cross-encoder/ms-marco-MiniLM-L-6-v2` (local BERT, ~500MB) |
 | Sparse retrieval | BM25 hybrid | `rank-bm25` — merged with dense results before reranker |
@@ -208,13 +208,13 @@ Sequential phase transitions within a project. No concurrent project processing.
 
 ### ADR-010: Model usage strategy
 
-- **Nano/Flash:** RAG retrieval, query rewriting, basic agent loops
-- **Pro:** Main reasoning, proposal generation, tech stack + team suggestions
-- **Claude Sonnet (optional):** Structured output for estimation + epic generation (Phases 5–6)
+- **`gpt-5.4-nano` (fast):** RAG query rewriting, LLM-as-judge, basic agent loops
+- **`gpt-5.4-mini` (main):** Main reasoning, proposal generation, tech stack + team suggestions, structured output for estimation + epic generation (Phases 5–6)
+- Single provider (OpenAI). Provider remains switchable via `MAIN_LLM_PROVIDER` / `FAST_LLM_PROVIDER`; `llm_factory.py` supports `openai` (default), `google`, `anthropic`.
 
-### ADR-011: SDK — `google-genai` only
+### ADR-011: SDK — `langchain-openai` (default provider)
 
-Use `google-genai` SDK with `langchain-google-genai` for LangChain integration. `google-generativeai` is deprecated/EOL. Models: `gemini-2.5-pro` (main), `gemini-2.5-flash` (fast).
+Main and fast LLM both use OpenAI via `langchain-openai`. Models: `gpt-5.4-mini` (main + structured), `gpt-5.4-nano` (fast). Available models on the project key: `gpt-5.4-mini`, `gpt-5.4-nano`, `text-embedding-3-small`. The `llm_factory.py` abstraction keeps `google` (`langchain-google-genai`) and `anthropic` (`langchain-anthropic`) selectable by env var without code change.
 
 ---
 
@@ -635,15 +635,17 @@ Visualization: Recharts (line, bar, stat card components).
 
 ## 13. Cost Estimate (One Full Workflow)
 
+Rates (flat, model-agnostic, from `metrics_tracker.calc_cost`): input `$0.0015 / 1K`, output `$0.002 / 1K`. Per-phase costs assume ~75% input / 25% output token split. Embeddings priced at `text-embedding-3-small` (~$0.02 / 1M tokens).
+
 | Phase | Model | Est. Tokens | Est. Cost |
 |-------|-------|-------------|-----------|
-| Phase 1 (embedding) | `text-embedding-3-small` | ~50K | ~$0.005 |
-| Phase 2 (RAG chat, 5 turns) | Gemini 2.5 Pro | ~30K | ~$0.11 |
-| Phase 3–4 (tool calls) | Gemini 2.5 Flash | ~10K | ~$0.01 |
-| Phase 5–6 (estimation + epics) | Claude Sonnet | ~20K | ~$0.06 |
-| **Total** | | ~110K | **~$0.19** |
+| Phase 1 (embedding) | `text-embedding-3-small` | ~50K | ~$0.001 |
+| Phase 2 (RAG chat, 5 turns) | `gpt-5.4-mini` + `gpt-5.4-nano` | ~30K | ~$0.049 |
+| Phase 3–4 (tool calls) | `gpt-5.4-mini` | ~10K | ~$0.016 |
+| Phase 5–6 (estimation + epics) | `gpt-5.4-mini` | ~20K | ~$0.033 |
+| **Total** | | ~110K | **~$0.10** |
 
-Budget guardrail: `MAX_COST_PER_WORKFLOW_USD=0.50`
+Budget guardrail: `MAX_COST_PER_WORKFLOW_USD=0.50` — enforced at the LangGraph node level (see ADR-005); workflow aborts with a budget error once cumulative `metrics.cost_usd` for the project exceeds this ceiling.
 
 ---
 
@@ -662,17 +664,17 @@ Budget guardrail: `MAX_COST_PER_WORKFLOW_USD=0.50`
 ## 15. Environment Variables
 
 ```bash
-# LLM
-MAIN_LLM_PROVIDER=google
-MAIN_LLM_MODEL=gemini-2.5-pro
-FAST_LLM_PROVIDER=google
-FAST_LLM_MODEL=gemini-2.5-flash
+# LLM — available models on project key: gpt-5.4-mini, gpt-5.4-nano, text-embedding-3-small
+MAIN_LLM_PROVIDER=openai
+MAIN_LLM_MODEL=gpt-5.4-mini
+FAST_LLM_PROVIDER=openai
+FAST_LLM_MODEL=gpt-5.4-nano
 TEMPERATURE=0.2
 
 # APIs
 OPENAI_API_KEY=
-GOOGLE_API_KEY=
-ANTHROPIC_API_KEY=           # optional, Phase 5+6
+GOOGLE_API_KEY=              # only if MAIN/FAST_LLM_PROVIDER=google
+ANTHROPIC_API_KEY=          # only if MAIN/FAST_LLM_PROVIDER=anthropic
 
 # GitHub
 GITHUB_TOKEN=

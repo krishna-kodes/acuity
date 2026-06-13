@@ -172,7 +172,7 @@ def test_collection_exists_false(tmp_path, monkeypatch):
     monkeypatch.setenv("CHROMA_PERSIST_PATH", str(tmp_path))
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
 
-    with patch("app.services.embedder.OpenAIEmbeddingFunction"):
+    with patch("app.services.vector_store.OpenAIEmbeddingFunction"):
         from app.services.embedder import collection_exists
         assert collection_exists("new_project") is False
 
@@ -200,8 +200,8 @@ async def test_embed_and_store_calls_upsert(tmp_path, monkeypatch):
     mock_collection = MagicMock()
     mock_collection.upsert = MagicMock()
 
-    with patch("app.services.embedder.chromadb.PersistentClient") as mock_client, \
-         patch("app.services.embedder.OpenAIEmbeddingFunction"):
+    with patch("app.services.vector_store.chromadb.PersistentClient") as mock_client, \
+         patch("app.services.vector_store.OpenAIEmbeddingFunction"):
         mock_client.return_value.get_or_create_collection.return_value = mock_collection
 
         from app.services.embedder import embed_and_store
@@ -242,8 +242,8 @@ async def test_ingest_document_cache_hit(tmp_path, monkeypatch):
         embed_call_count["n"] += 1
         return len(chunks)
 
-    with patch("app.services.embedder.chromadb.PersistentClient") as mock_client, \
-         patch("app.services.embedder.OpenAIEmbeddingFunction"), \
+    with patch("app.services.vector_store.chromadb.PersistentClient") as mock_client, \
+         patch("app.services.vector_store.OpenAIEmbeddingFunction"), \
          patch("app.services.embedder.embed_and_store", fake_embed):
         # Make list_collections return the project so collection_exists returns True
         mock_collection_info = MagicMock()
@@ -285,8 +285,8 @@ async def test_ingest_document_updates_status(tmp_path, monkeypatch):
     mock_pdf.__exit__ = MagicMock(return_value=False)
     mock_pdf.pages = [mock_page]
 
-    with patch("app.services.embedder.chromadb.PersistentClient") as mock_client, \
-         patch("app.services.embedder.OpenAIEmbeddingFunction"), \
+    with patch("app.services.vector_store.chromadb.PersistentClient") as mock_client, \
+         patch("app.services.vector_store.OpenAIEmbeddingFunction"), \
          patch("pdfplumber.open", return_value=mock_pdf):
         # No existing collections → collection_exists returns False
         mock_client.return_value.list_collections.return_value = []

@@ -142,18 +142,18 @@ async def detect_and_stage_pii(
     If pii_review_gate=False → auto-confirms all detections and proceeds.
     If pii_review_gate=True → stops here; PM must call complete_ingestion() after review.
     """
-    from app.services.embedder import collection_exists, delete_collection, get_collection
+    from app.services.vector_store import vector_store
 
     chroma_project_id = str(project_id)
 
     # Only use ChromaDB cache if SQLite state is also complete (status=ready).
     # If ChromaDB exists but document isn't ready, a prior run was interrupted —
     # drop the stale collection and re-run PII detection.
-    if collection_exists(chroma_project_id):
+    if vector_store.exists(chroma_project_id):
         doc_status = db.query(Document).filter(Document.id == document_id).first()
         if doc_status and doc_status.status == DocumentStatus.ready:
-            return get_collection(chroma_project_id).count()
-        delete_collection(chroma_project_id)
+            return vector_store.count(chroma_project_id)
+        vector_store.delete(chroma_project_id)
 
     from app.models.pii import PIIDetection
     existing = db.query(PIIDetection).filter(

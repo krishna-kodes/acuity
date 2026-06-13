@@ -23,27 +23,57 @@ async def test_retrieve_hybrid_returns_merged_results(tmp_path, monkeypatch):
     monkeypatch.setenv("CHROMA_PERSIST_PATH", str(tmp_path))
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
 
-    mock_collection = MagicMock()
-    mock_collection.get.return_value = {
+    mock_store = MagicMock()
+    mock_store.get_all.return_value = {
         "documents": ["Auth requires OAuth.", "Login page design."],
         "metadatas": [
             {"project_id": "1", "chunk_index": 0, "section_hint": "Auth"},
             {"project_id": "1", "chunk_index": 1, "section_hint": "UI"},
         ],
     }
-    mock_collection.query.return_value = {
+    mock_store.query.return_value = {
         "documents": [["Auth requires OAuth."]],
         "metadatas": [[{"project_id": "1", "chunk_index": 0, "section_hint": "Auth"}]],
         "distances": [[0.1]],
     }
 
-    with patch("app.services.rag.get_collection", return_value=mock_collection), \
-         patch("app.services.embedder.OpenAIEmbeddingFunction"):
+    with patch("app.services.rag.vector_store", mock_store):
         from app.services.rag import retrieve_hybrid
         result = await retrieve_hybrid("1", ["authentication"], top_k=5)
 
     assert len(result) >= 1
     assert all("text" in r for r in result)
+
+
+@pytest.mark.asyncio
+async def test_bm25_cache_reused_when_count_unchanged(monkeypatch):
+    """Second retrieve with same chunk count must not reload the corpus."""
+    from app.services import rag
+
+    rag.invalidate_bm25("7")
+
+    mock_store = MagicMock()
+    mock_store.count.return_value = 2
+    mock_store.get_all.return_value = {
+        "documents": ["Auth requires OAuth.", "Login page design."],
+        "metadatas": [
+            {"project_id": "7", "chunk_index": 0, "section_hint": "Auth"},
+            {"project_id": "7", "chunk_index": 1, "section_hint": "UI"},
+        ],
+    }
+    mock_store.query.return_value = {
+        "documents": [["Auth requires OAuth."]],
+        "metadatas": [[{"project_id": "7", "chunk_index": 0, "section_hint": "Auth"}]],
+        "distances": [[0.1]],
+    }
+
+    with patch("app.services.rag.vector_store", mock_store):
+        await rag.retrieve_hybrid("7", ["auth"], top_k=5)
+        await rag.retrieve_hybrid("7", ["auth"], top_k=5)
+
+    assert mock_store.get_all.call_count == 1  # corpus loaded once, BM25 cached
+    assert mock_store.count.call_count == 2    # count checked each call (cheap)
+    rag.invalidate_bm25("7")
 
 
 def test_rerank_returns_top_n():
@@ -78,15 +108,15 @@ async def test_retrieve_full_pipeline(tmp_path, monkeypatch):
     mock_llm = MagicMock()
     mock_llm.ainvoke = AsyncMock(return_value=mock_response)
 
-    mock_collection = MagicMock()
-    mock_collection.get.return_value = {
+    mock_store = MagicMock()
+    mock_store.get_all.return_value = {
         "documents": ["OAuth required.", "JWT tokens used."],
         "metadatas": [
             {"project_id": "42", "chunk_index": 0, "section_hint": "Auth"},
             {"project_id": "42", "chunk_index": 1, "section_hint": "Auth"},
         ],
     }
-    mock_collection.query.return_value = {
+    mock_store.query.return_value = {
         "documents": [["OAuth required."]],
         "metadatas": [[{"project_id": "42", "chunk_index": 0, "section_hint": "Auth"}]],
         "distances": [[0.1]],
@@ -94,8 +124,7 @@ async def test_retrieve_full_pipeline(tmp_path, monkeypatch):
     mock_scores = [0.9, 0.8]
 
     with patch("app.services.rag.get_fast_llm", return_value=mock_llm), \
-         patch("app.services.rag.get_collection", return_value=mock_collection), \
-         patch("app.services.embedder.OpenAIEmbeddingFunction"), \
+         patch("app.services.rag.vector_store", mock_store), \
          patch("app.services.rag._get_reranker") as mock_reranker_fn:
         mock_reranker = MagicMock()
         mock_reranker.predict.return_value = mock_scores

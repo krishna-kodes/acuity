@@ -11,6 +11,7 @@ Usage:
 
 import asyncio
 import json as _json
+import logging
 from functools import wraps
 from typing import TYPE_CHECKING, Any, TypedDict
 
@@ -28,8 +29,12 @@ from app.database import SessionLocal
 from app.models.employee import Employee, EmployeeSkill, Skill
 from app.models.reference import ApprovedTechnology, HistoricalProject
 from app.services.llm_factory import get_llm
+
+logger = logging.getLogger(__name__)
 from app.services.metrics_tracker import (
+    CostBudgetExceededError,
     calc_cost,
+    enforce_cost_budget,
     record_error,
     record_latency,
     record_retrieval,
@@ -124,6 +129,9 @@ def with_retry(max_retries: int = 3, base_delay: float = 1.0):
             for attempt in range(max_retries):
                 try:
                     return await fn(*args, **kwargs)
+                except CostBudgetExceededError:
+                    # Budget breaches are terminal — retrying only spends more.
+                    raise
                 except Exception:
                     if attempt == max_retries - 1:
                         raise
@@ -204,7 +212,8 @@ def estimate_effort(proposal_summary: str, team_size: int, reference_projects: l
         f"- {p.get('name', p.get('project_name', 'Unknown'))}: "
         f"{p.get('duration_weeks', '?')}w, "
         f"{p.get('team_size', '?')} devs, "
-        f"{p.get('estimated_points', '?')} pts"
+        f"estimated {p.get('estimated_points', '?')} pts / "
+        f"actual {p.get('actual_points', '?')} pts"
         for p in reference_projects[:5]
     ) or "No reference projects available."
 
@@ -288,6 +297,7 @@ async def _chat_turn_node(state: ProjectState) -> dict[str, Any]:
 
     from app.config import settings
 
+    enforce_cost_budget(int(state["project_id"]))
     messages = list(state.get("chat_messages") or [])
     project_id = state["project_id"]
     last_user = next(
@@ -463,8 +473,8 @@ async def _chat_turn_node(state: ProjectState) -> dict[str, Any]:
 
 async def _phase_2_complete_node(state: ProjectState) -> dict[str, Any]:
     """Marks Phase 2 complete. Runs L3/L4 deep scan once across full corpus."""
-    from app.services.embedder import get_collection
     from app.services.tbd_detection import detect_level_3, detect_level_4
+    from app.services.vector_store import vector_store
 
     ps = dict(state.get("phase_status") or {})
     ps["phase_2"] = "complete"
@@ -473,8 +483,7 @@ async def _phase_2_complete_node(state: ProjectState) -> dict[str, Any]:
     known = {t.get("text", "") for t in (state.get("tbd_items") or [])}
 
     try:
-        col = get_collection(project_id)
-        raw = col.get(include=["documents", "metadatas"])
+        raw = vector_store.get_all(project_id)
         all_chunks = [
             {"text": d, **(m or {})}
             for d, m in zip(raw["documents"] or [], raw["metadatas"] or [])
@@ -510,6 +519,7 @@ def _chat_routing(state: ProjectState) -> str:
 async def _phase_3_stack_node(state: ProjectState) -> dict[str, Any]:
     """Phase 3: Tech stack suggestion — queries approved_technologies DB + LLM."""
     _require_phase_complete(state, 3)
+    enforce_cost_budget(int(state["project_id"]))
 
     ps = dict(state.get("phase_status") or {})
     ps["phase_3"] = "in_progress"
@@ -775,6 +785,7 @@ async def _phase_5_estimate_node(state: ProjectState) -> dict[str, Any]:
     """Phase 5: Effort estimation — ReAct agent pulls historical data."""
     import time as _time
     _require_phase_complete(state, 5)
+    enforce_cost_budget(int(state["project_id"]))
 
     proposal_summary = state.get("proposal_state", {}).get("summary", "No proposal available.")
     team_size = len(state.get("team_suggestion", {}).get("members", [])) or 3
@@ -826,6 +837,25 @@ async def _phase_5_estimate_node(state: ProjectState) -> dict[str, Any]:
             except _json.JSONDecodeError:
                 pass
 
+    # Apply the learned calibration factor (estimation feedback loop).
+    # Factor = mean(actual/estimated) over closed outcomes; 1.0 until corpus warms up.
+    try:
+        from app.models.project import Project as _ProjectModel
+        from app.services.calibration import get_calibration
+        with SessionLocal() as _db:
+            _proj = _db.get(_ProjectModel, int(state["project_id"]))
+            _domain = _proj.domain if _proj else None
+            cal = get_calibration(_db, domain=_domain)
+        if cal["factor"] != 1.0 and effort.get("total_points"):
+            raw_points = effort["total_points"]
+            effort["total_points"] = round(raw_points * cal["factor"])
+            effort["raw_total_points"] = raw_points
+        effort["calibration_factor"] = cal["factor"]
+        effort["calibration_samples"] = cal["samples"]
+        effort["calibration_bucket"] = cal["bucket"]
+    except Exception as _exc:
+        logger.warning("Calibration skipped: %s", _exc)
+
     record_latency(int(state["project_id"]), "phase_5", "estimation_node", (_time.monotonic() - _t0) * 1000)
     _p5_inp, _p5_out = 0, 0
     for _msg in agent_result.get("messages", []):
@@ -844,6 +874,7 @@ async def _phase_6_epics_node(state: ProjectState) -> dict[str, Any]:
     """Phase 6: Epic & task generation — ReAct agent with structured LLM output."""
     import time as _time
     _require_phase_complete(state, 6)
+    enforce_cost_budget(int(state["project_id"]))
 
     proposal_summary = state.get("proposal_state", {}).get("summary", "No proposal available.")
     tech_stack = state.get("tech_stack") or {}

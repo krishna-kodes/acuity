@@ -15,6 +15,55 @@ def calc_cost(input_tokens: int, output_tokens: int) -> float:
     )
 
 
+class CostBudgetExceededError(Exception):
+    """Raised when a project's cumulative LLM cost exceeds the workflow budget."""
+
+    def __init__(self, project_id: int, spent: float, budget: float):
+        self.project_id = project_id
+        self.spent = spent
+        self.budget = budget
+        super().__init__(
+            f"AI cost limit reached. This project has used ${spent:.4f} of its "
+            f"${budget:.2f} budget, so further AI steps are paused to control spend. "
+            f"Raise the workflow cost limit or contact your administrator to continue."
+        )
+
+
+def project_cost_usd(project_id: int) -> float:
+    """Sum of all recorded LLM cost for a project (USD)."""
+    from sqlalchemy import func
+
+    from app.database import SessionLocal
+    from app.models.observability import Metric
+
+    db = SessionLocal()
+    try:
+        total = (
+            db.query(func.coalesce(func.sum(Metric.cost_usd), 0.0))
+            .filter(Metric.project_id == project_id)
+            .scalar()
+        )
+        return float(total or 0.0)
+    finally:
+        db.close()
+
+
+def enforce_cost_budget(project_id: int) -> None:
+    """Abort the workflow if cumulative project cost has hit the budget ceiling.
+
+    Enforced at the LangGraph node level (ADR-005). A budget of <= 0 disables
+    the guard. Raises CostBudgetExceededError when spend >= budget.
+    """
+    if not settings.metrics_enabled:
+        return
+    budget = settings.max_cost_per_workflow_usd
+    if budget <= 0:
+        return
+    spent = project_cost_usd(project_id)
+    if spent >= budget:
+        raise CostBudgetExceededError(project_id, spent, budget)
+
+
 def record_tokens(
     project_id: int,
     phase: str,

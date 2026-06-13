@@ -8,6 +8,8 @@ export interface TaskItem {
   id: string;
   title: string;
   points: number;
+  actualPoints?: number | null;
+  remoteState?: string | null;
   assignee?: string;
   syncStatus: SyncStatus;
 }
@@ -16,6 +18,8 @@ export interface EpicItem {
   id: string;
   title: string;
   points: number;
+  actualPoints?: number | null;
+  remoteState?: string | null;
   syncStatus: SyncStatus;
   selected: boolean;
   tasks: TaskItem[];
@@ -35,6 +39,32 @@ function PointsBadge({ points }: { points: number }) {
   );
 }
 
+/** Realized points pulled back from the tracker (bidirectional sync). */
+function ActualBadge({ estimated, actual }: { estimated: number; actual: number }) {
+  const over = actual > estimated;
+  const under = actual < estimated;
+  return (
+    <span
+      title={`Actual ${actual} vs estimated ${estimated} pts`}
+      className={cn(
+        "text-[10px] font-medium border px-1.5 py-0.5 rounded tabular-nums",
+        over && "text-warning bg-warning-subtle border-warning/30",
+        under && "text-success bg-success-subtle border-success/30",
+        !over && !under && "text-text-secondary bg-surface-subtle border-border"
+      )}
+    >
+      actual {actual}
+    </span>
+  );
+}
+
+function ClosedDot({ state }: { state?: string | null }) {
+  if (state !== "closed") return null;
+  return (
+    <span title="Closed on tracker" className="w-1.5 h-1.5 rounded-full bg-success shrink-0" />
+  );
+}
+
 function TaskRow({ task }: { task: TaskItem }) {
   return (
     <div className="flex items-center gap-3 px-4 py-2 border-t border-border/60 bg-surface-subtle/40">
@@ -46,7 +76,11 @@ function TaskRow({ task }: { task: TaskItem }) {
         {task.assignee && (
           <span className="text-[10px] text-text-muted hidden sm:block">{task.assignee}</span>
         )}
+        <ClosedDot state={task.remoteState} />
         <PointsBadge points={task.points} />
+        {task.actualPoints != null && (
+          <ActualBadge estimated={task.points} actual={task.actualPoints} />
+        )}
         <SyncStatusBadge status={task.syncStatus} size="sm" />
       </div>
     </div>
@@ -96,7 +130,11 @@ export function EpicTaskListItem({
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
+          <ClosedDot state={epic.remoteState} />
           <PointsBadge points={epic.points} />
+          {epic.actualPoints != null && (
+            <ActualBadge estimated={epic.points} actual={epic.actualPoints} />
+          )}
           <SyncStatusBadge status={epic.syncStatus} />
 
           {/* Expand toggle */}

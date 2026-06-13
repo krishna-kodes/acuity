@@ -82,3 +82,26 @@ def get_github_repo_issues(repo: str, milestone: int) -> list[dict]:
         resp = client.get(url, params=params, headers=_headers())
         resp.raise_for_status()
         return resp.json()
+
+
+@mcp.tool
+def get_milestone(repo: str, number: int) -> dict:
+    """Read a single milestone's current state (used by bidirectional pull).
+
+    Returns state ('open'|'closed'), open/closed issue counts, due/closed timestamps.
+    """
+    url = f"{_GITHUB_API}/repos/{settings.github_owner}/{repo}/milestones/{number}"
+    with httpx.Client() as client:
+        resp = client.get(url, headers=_headers())
+        resp.raise_for_status()
+        m = resp.json()
+    return {
+        "number": m["number"],
+        "title": m["title"],
+        "state": m.get("state", "open"),
+        "open_issues": m.get("open_issues", 0),
+        "closed_issues": m.get("closed_issues", 0),
+        "due_on": m.get("due_on"),
+        "closed_at": m.get("closed_at"),
+        "html_url": m.get("html_url", ""),
+    }

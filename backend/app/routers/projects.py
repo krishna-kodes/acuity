@@ -48,8 +48,9 @@ from app.schemas.project import (
 )
 from app.schemas.proposal import ProposalResponse, ProposalRetryRequest, ProposalSectionOut, RegenerateSectionRequest
 from app.schemas.proposal_sections import TEMPLATE_VERSION, ProposalSectionId, SectionResponse
-from app.schemas.sync import SyncConfigRequest, SyncConfigResponse, SyncProvider, SyncRequest, SyncResponse
+from app.schemas.sync import PullSyncResponse, SyncConfigRequest, SyncConfigResponse, SyncProvider, SyncRequest, SyncResponse
 from app.services.ingestion import ingest_document
+from app.services.metrics_tracker import enforce_cost_budget
 from app.services.workflow import get_workflow
 
 router = APIRouter(tags=["projects"])
@@ -774,10 +775,9 @@ def preview_document(
     if text is None:
         # Fallback: reconstruct redacted text from ChromaDB chunks in order.
         try:
-            from app.services.embedder import get_collection
+            from app.services.vector_store import vector_store
 
-            col = get_collection(str(project.id))
-            got = col.get(include=["documents", "metadatas"])
+            got = vector_store.get_all(str(project.id))
             rows = sorted(
                 zip(got.get("documents") or [], got.get("metadatas") or []),
                 key=lambda r: (r[1] or {}).get("chunk_index", 0),
@@ -1638,6 +1638,7 @@ async def suggest_stack_stream(
     from app.services.llm_factory import get_llm
 
     project = _get_project_or_404(project_id, db)
+    enforce_cost_budget(int(project_id))
 
     if project.phase not in _POST_MODULES_PHASES:
         raise HTTPException(
@@ -1936,6 +1937,7 @@ async def estimate_effort_stream(
     from app.services.llm_factory import get_llm
 
     project = _get_project_or_404(project_id, db)
+    enforce_cost_budget(int(project_id))
 
     if project.phase not in _POST_TEAM_PHASES:
         raise HTTPException(
@@ -2206,6 +2208,7 @@ async def stream_epics(
     from app.services.workflow import _EPIC_GENERATION_PROMPT
 
     project = _get_project_or_404(project_id, db)
+    enforce_cost_budget(int(project_id))
 
     if project.phase not in _POST_ESTIMATION_PHASES:
         raise HTTPException(
@@ -2468,6 +2471,8 @@ def get_epics(
                 "title": t.title,
                 "description": t.description,
                 "story_points": t.estimated_points or 3,
+                "actual_points": t.actual_points,
+                "remote_state": t.remote_state,
                 "labels": labels,
                 "assignees": assignees,
                 "sync_status": t.sync_status.value if hasattr(t.sync_status, "value") else str(t.sync_status),
@@ -2478,6 +2483,9 @@ def get_epics(
             "id": epic.id,
             "title": epic.title,
             "description": epic.description,
+            "estimated_points": epic.estimated_points,
+            "actual_points": epic.actual_points,
+            "remote_state": epic.remote_state,
             "sync_status": epic.sync_status.value if hasattr(epic.sync_status, "value") else str(epic.sync_status),
             "github_milestone_number": epic.github_milestone_number,
             "github_milestone_url": epic.github_milestone_url,
@@ -2550,9 +2558,14 @@ async def sync(
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Sync failed: {exc}") from exc
 
+    # When the provider reports zero failures, everything synced. Only on a partial
+    # failure do we fall back to per-item ref presence to mark the losers as failed.
+    all_ok = result.get("failed", 0) == 0
+
     for i, (epic_orm, task_orms) in enumerate(epic_task_map):
         epic_dict = epics_payload[i]
-        epic_orm.sync_status = DBSyncStatus.synced
+        epic_synced = all_ok or bool(epic_dict.get("_tracker_ref"))
+        epic_orm.sync_status = DBSyncStatus.synced if epic_synced else DBSyncStatus.failed
         if provider == SyncProvider.github:
             epic_orm.github_milestone_number = epic_dict.get("_milestone_number")
             epic_orm.github_milestone_url = epic_dict.get("_milestone_url")
@@ -2564,7 +2577,8 @@ async def sync(
 
         for j, task_orm in enumerate(task_orms):
             task_dict = epic_dict["tasks"][j]
-            task_orm.sync_status = DBSyncStatus.synced
+            task_synced = all_ok or bool(task_dict.get("_tracker_ref"))
+            task_orm.sync_status = DBSyncStatus.synced if task_synced else DBSyncStatus.failed
             if provider == SyncProvider.github:
                 task_orm.github_issue_number = task_dict.get("_issue_number")
                 task_orm.github_issue_url = task_dict.get("_issue_url")
@@ -2587,6 +2601,45 @@ async def sync(
             break
 
     return SyncResponse(**result, milestones_url=milestones_url)
+
+
+@router.post("/projects/{project_id}/sync/pull", response_model=PullSyncResponse)
+def pull_sync(
+    project_id: str,
+    db: Session = Depends(get_db),
+) -> PullSyncResponse:
+    """Bidirectional sync — refresh epics/tasks from their GitHub remotes.
+
+    Reads issue/milestone state back, fills actual_points, and (when all epics are
+    closed) records estimation outcomes that calibrate future estimates.
+    """
+    from app.models.enums import ProjectPhase, ProjectStatus
+    from app.services.calibration import record_outcomes
+    from app.services.github_pull import pull_sync_state
+
+    project = _get_project_or_404(project_id, db)
+
+    try:
+        counts = pull_sync_state(project, db)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Pull failed: {exc}") from exc
+
+    epics = db.query(Epic).filter(Epic.project_id == int(project_id)).all()
+    synced_epics = [e for e in epics if e.github_milestone_number]
+    project_complete = bool(synced_epics) and all(e.remote_state == "closed" for e in synced_epics)
+
+    outcomes_recorded = 0
+    if project_complete:
+        outcomes_recorded = record_outcomes(project, db)
+        project.status = ProjectStatus.complete
+        project.phase = ProjectPhase.complete
+        db.commit()
+
+    return PullSyncResponse(
+        **counts,
+        outcomes_recorded=outcomes_recorded,
+        project_complete=project_complete,
+    )
 
 
 @router.get("/projects/{project_id}/sync-config", response_model=SyncConfigResponse)
@@ -2657,6 +2710,9 @@ async def chat(
     # Guard against stale/orphan project URLs whose app.db row was wiped but
     # whose chroma collection still holds a previous document's embeddings.
     _get_project_or_404(project_id, db)
+    # Budget guard before opening the stream so it returns a clean 402 rather
+    # than failing mid-stream (this SSE path bypasses the LangGraph node guard).
+    enforce_cost_budget(int(project_id))
 
     wf = await get_workflow()
     config = {"configurable": {"thread_id": project_id}}
@@ -2884,6 +2940,21 @@ def get_metrics(
             for r in run_rows:
                 quality_scores.append(QualityScoreItem(grader=r.grader, score=r.score, source="eval_run"))
 
+    # ── Estimation accuracy (bidirectional sync actuals + calibration) ─────────
+    from app.schemas.metrics import EstimationAccuracy, EstimationEpicItem
+    from app.services.calibration import accuracy_summary
+    _acc = accuracy_summary(db, project_id=pid)
+    estimation_accuracy = EstimationAccuracy(
+        per_epic=[EstimationEpicItem(**e) for e in _acc["per_epic"]],
+        estimated_total=_acc["estimated_total"],
+        actual_total=_acc["actual_total"],
+        bias_pct=_acc["bias_pct"],
+        mae_pct=_acc["mae_pct"],
+        calibration_factor=_acc["calibration_factor"],
+        calibration_samples=_acc["calibration_samples"],
+        calibration_bucket=_acc["calibration_bucket"],
+    )
+
     return MetricsResponse(
         total_tokens=total_tokens,
         total_cost_usd=round(total_cost, 6),
@@ -2906,4 +2977,5 @@ def get_metrics(
         retrieval_by_query=retrieval_by_query,
         quality_scores=quality_scores,
         avg_groundedness=avg_groundedness,
+        estimation_accuracy=estimation_accuracy,
     )

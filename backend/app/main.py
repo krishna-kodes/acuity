@@ -3,6 +3,9 @@ import secrets
 
 from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+
+from app.services.metrics_tracker import CostBudgetExceededError
 from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
@@ -69,6 +72,12 @@ app.include_router(
     include_in_schema=settings.expose_factory_in_docs,
 )
 app.include_router(admin_router, prefix="/api/v1")
+
+
+@app.exception_handler(CostBudgetExceededError)
+async def _cost_budget_handler(_request, exc: CostBudgetExceededError):
+    # 402 Payment Required — workflow hit MAX_COST_PER_WORKFLOW_USD ceiling.
+    return JSONResponse(status_code=402, content={"detail": str(exc)})
 
 
 @app.get("/health")
