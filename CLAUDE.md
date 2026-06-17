@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-> **Implementation status (June 2026):** Frontend (Next.js 16.2, Tailwind v4) through Epics 0–3 complete. Backend: FastAPI scaffold, SQLite schema (17+ tables + Alembic), ChromaDB ingestion pipeline, GitHub MCP sync, eval harness (33 test cases), structured proposal generator all done. LLM stack: OpenAI `gpt-5.4-nano` (main + fast + structured), `text-embedding-3-small` (embeddings).
+> **Implementation status (June 2026):** Frontend (Next.js 16.2, Tailwind v4) through Epics 0–3 complete. Backend: FastAPI scaffold, SQLite schema (17+ tables + Alembic), ChromaDB ingestion pipeline, GitHub MCP sync, eval harness (33 test cases), structured proposal generator all done. LLM stack: OpenAI `gpt-5.4-mini` (main + structured), `gpt-5.4-nano` (fast), `text-embedding-3-small` (embeddings).
 
 > **Design document overrides:** `capstone_project_design_document.md` is the original submission artifact and has not been updated. Where it conflicts with this file, **this file wins**:
 > - **Embedding model:** Design doc says `Gemini text-embedding-004` — overridden by ADR-004. Use `text-embedding-3-small` (OpenAI, 1536 dims).
@@ -23,7 +23,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 9. **LLM provider switchable via env var** — never hardcode provider names; read from `MAIN_LLM_PROVIDER` / `FAST_LLM_PROVIDER`
 10. **Sync provider switchable via `SYNC_PROVIDER` env var** — `github` (default) or `jira`; resolved at runtime via `sync_factory.py`
 11. **Two separate SQLite databases** — `app.db` for application data, `project_state.db` for LangGraph checkpoints
-12. **Use `langchain-openai` for LLM calls** — main and fast LLM both use `MAIN_LLM_PROVIDER=openai` / `FAST_LLM_PROVIDER=openai`. Models: `gpt-5.4-nano` (main and fast).
+12. **Use `langchain-openai` for LLM calls** — main and fast LLM both use `MAIN_LLM_PROVIDER=openai` / `FAST_LLM_PROVIDER=openai`. Models: `gpt-5.4-mini` (main + structured), `gpt-5.4-nano` (fast).
 
 ---
 
@@ -151,9 +151,9 @@ Phase transitions are PM-initiated ("Proceed" button). Phase N cannot start unti
 | Backend | FastAPI + Uvicorn |
 | ORM / DB | SQLAlchemy + SQLite + Alembic |
 | Vector DB | ChromaDB `PersistentClient` |
-| LLM (main) | `gpt-5.4-nano` via `langchain-openai` — switchable via `MAIN_LLM_PROVIDER` |
+| LLM (main) | `gpt-5.4-mini` via `langchain-openai` — switchable via `MAIN_LLM_PROVIDER` |
 | LLM (fast) | `gpt-5.4-nano` — query rewriting, LLM-as-judge |
-| LLM (structured) | `gpt-5.4-nano` — estimation + epic generation (Phase 5–6) |
+| LLM (structured) | `gpt-5.4-mini` — estimation + epic generation (Phase 5–6) |
 | Embeddings | `text-embedding-3-small`, 1536 dims, cosine distance |
 | Sparse retrieval | BM25 (rank-bm25) — merged with dense results before reranker |
 | Reranker | `cross-encoder/ms-marco-MiniLM-L-6-v2` (local, ~500MB) |
@@ -427,7 +427,7 @@ Copy this to `.env` and fill in values:
 ```bash
 # LLM — available models on this OpenAI key: gpt-5.4-mini, gpt-5.4-nano, text-embedding-3-small
 MAIN_LLM_PROVIDER=openai
-MAIN_LLM_MODEL=gpt-5.4-nano
+MAIN_LLM_MODEL=gpt-5.4-mini
 FAST_LLM_PROVIDER=openai
 FAST_LLM_MODEL=gpt-5.4-nano
 TEMPERATURE=0.2

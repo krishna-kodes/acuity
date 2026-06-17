@@ -1,50 +1,37 @@
-import chromadb
-from chromadb.utils.embedding_functions import OpenAIEmbeddingFunction
+"""Embedding + storage layer — delegates all vector-store access to the adapter.
 
-from app.config import settings
+Phase nodes and RAG must use `app.services.vector_store.vector_store` directly.
+These helpers exist for the ingestion path and back-compat.
+"""
+
 from app.services.ingestion import Chunk
-
-# Locked by ADR-004 — never make these env-configurable
-_EMBEDDING_MODEL = "text-embedding-3-small"
-_EMBEDDING_DIMS = 1536
-
-
-def get_collection(project_id: str) -> chromadb.Collection:
-    client = chromadb.PersistentClient(path=settings.chroma_persist_path)
-    return client.get_or_create_collection(
-        name=f"project_{project_id}",
-        metadata={"hnsw:space": "cosine"},
-        embedding_function=OpenAIEmbeddingFunction(  # type: ignore[arg-type]
-            api_key=settings.openai_api_key,
-            model_name=_EMBEDDING_MODEL,
-            dimensions=_EMBEDDING_DIMS,
-        ),
-    )
+from app.services.vector_store import vector_store
 
 
 def collection_exists(project_id: str) -> bool:
-    client = chromadb.PersistentClient(path=settings.chroma_persist_path)
-    existing = [c.name for c in client.list_collections()]
-    collection_name = f"project_{project_id}"
-    if collection_name not in existing:
-        return False
-    return client.get_collection(collection_name).count() > 0
+    return vector_store.exists(project_id)
 
 
 def delete_collection(project_id: str) -> None:
-    client = chromadb.PersistentClient(path=settings.chroma_persist_path)
-    collection_name = f"project_{project_id}"
-    try:
-        client.delete_collection(collection_name)
-    except Exception:
-        pass
+    vector_store.delete(project_id)
+    _invalidate_bm25(project_id)
+
+
+def _invalidate_bm25(project_id: str) -> None:
+    # Lazy import avoids an import cycle (rag imports vector_store, not embedder).
+    from app.services.rag import invalidate_bm25
+    invalidate_bm25(project_id)
+
+
+def collection_count(project_id: str) -> int:
+    return vector_store.count(project_id)
 
 
 async def embed_and_store(chunks: list[Chunk]) -> int:
     if not chunks:
         return 0
-    collection = get_collection(chunks[0].project_id)
-    collection.upsert(
+    vector_store.upsert(
+        project_id=chunks[0].project_id,
         ids=[f"{c.project_id}_{c.chunk_index}" for c in chunks],
         documents=[c.text for c in chunks],
         metadatas=[{
@@ -56,4 +43,5 @@ async def embed_and_store(chunks: list[Chunk]) -> int:
             "token_count": c.token_count,
         } for c in chunks],
     )
+    _invalidate_bm25(chunks[0].project_id)
     return len(chunks)

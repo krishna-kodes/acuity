@@ -16,6 +16,7 @@ import {
   getSyncConfig,
   updateSyncConfig,
   getEstimateExportUrl,
+  pullSync,
   _apiBase,
 } from "@/lib/api";
 import type { SyncProvider, SyncConfig, SyncConfigResponse } from "@/lib/api";
@@ -24,6 +25,9 @@ type ApiEpic = {
   id: number;
   title: string;
   description: string | null;
+  estimated_points: number | null;
+  actual_points: number | null;
+  remote_state: string | null;
   sync_status: string;
   github_milestone_number: number | null;
   github_milestone_url: string | null;
@@ -35,6 +39,8 @@ type ApiEpic = {
     title: string;
     description: string | null;
     story_points: number;
+    actual_points: number | null;
+    remote_state: string | null;
     labels: string[];
     sync_status: string;
     github_issue_number: number | null;
@@ -50,12 +56,16 @@ function mapApiEpics(apiEpics: ApiEpic[]): EpicItem[] {
     id: String(e.id),
     title: e.title,
     points: e.tasks.reduce((sum, t) => sum + (t.story_points ?? 0), 0),
+    actualPoints: e.actual_points,
+    remoteState: e.remote_state,
     syncStatus: (e.sync_status as SyncStatus) ?? "pending",
     selected: e.sync_status !== "skipped",
     tasks: e.tasks.map((t) => ({
       id: String(t.id),
       title: t.title,
       points: t.story_points ?? 3,
+      actualPoints: t.actual_points,
+      remoteState: t.remote_state,
       syncStatus: (t.sync_status as SyncStatus) ?? "pending",
     })),
   }));
@@ -200,7 +210,26 @@ export default function EpicsPage({ params }: { params: Promise<{ id: string }> 
   const [milestonesUrl, setMilestonesUrl]   = useState<string | null>(null);
   const [syncCfg, setSyncCfg]               = useState<SyncConfigResponse | null>(null);
   const [showConfig, setShowConfig]         = useState(false);
+  const [pulling, setPulling]               = useState(false);
   const epicsFiredRef = useRef(false);
+
+  async function handleRefreshStatus() {
+    setPulling(true);
+    try {
+      const res = await pullSync(id);
+      const data = await getEpics(id);
+      setEpics(mapApiEpics(data.epics));
+      if (res.project_complete) {
+        toast.success(`Project complete — ${res.closed} closed. Calibration recorded.`);
+      } else {
+        toast.success(`Refreshed: ${res.closed} closed, ${res.still_open} open.`);
+      }
+    } catch {
+      toast.error("Could not refresh status from GitHub.");
+    } finally {
+      setPulling(false);
+    }
+  }
 
   async function runEpicsStream(isCancelled?: () => boolean, force = false) {
     setGenerating(true);
@@ -411,6 +440,23 @@ export default function EpicsPage({ params }: { params: Promise<{ id: string }> 
                     Re-generate
                   </>
                 )}
+              </button>
+
+              {/* Refresh status — bidirectional pull from GitHub (actuals + closed state) */}
+              <button
+                onClick={handleRefreshStatus}
+                disabled={pulling || epicsStatus !== "done"}
+                title="Pull issue/milestone state and actual points back from GitHub"
+                className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border border-border bg-card hover:bg-surface-subtle transition-colors disabled:opacity-50"
+              >
+                <svg
+                  className={cn("w-3.5 h-3.5", pulling && "animate-spin")}
+                  fill="none" viewBox="0 0 16 16" stroke="currentColor" strokeWidth={2}
+                >
+                  <path d="M2 8a6 6 0 0 1 10.2-4.2M14 8a6 6 0 0 1-10.2 4.2" strokeLinecap="round" />
+                  <path d="M12 1v3h-3M4 15v-3h3" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                {pulling ? "Refreshing…" : "Refresh status"}
               </button>
 
               {milestonesUrl && (

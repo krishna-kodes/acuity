@@ -38,6 +38,23 @@ class QualityScoreItem(BaseModel):
     source: str        # "live" | "eval_run"
 
 
+class EstimationEpicItem(BaseModel):
+    epic: str
+    estimated: int
+    actual: int
+
+
+class EstimationAccuracy(BaseModel):
+    per_epic: list[EstimationEpicItem]
+    estimated_total: int
+    actual_total: int
+    bias_pct: float | None         # +ve = under-estimated (actual > estimate)
+    mae_pct: float | None          # mean absolute % error across epics
+    calibration_factor: float      # multiplier applied to future estimates
+    calibration_samples: int       # outcomes backing the factor
+    calibration_bucket: str        # which bucket the factor came from
+
+
 class MetricsResponse(BaseModel):
     # Summary
     total_tokens: int
@@ -58,3 +75,5 @@ class MetricsResponse(BaseModel):
     retrieval_by_query: list[RetrievalQueryItem]
     quality_scores: list[QualityScoreItem]
     avg_groundedness: float | None
+    # Estimation feedback loop (bidirectional sync + calibration)
+    estimation_accuracy: EstimationAccuracy

@@ -17,6 +17,7 @@ const TABS = [
   "Token Usage & Cost",
   "AI Quality",
   "Retrieval",
+  "Estimation",
   "Error Handling",
   "Latency",
 ] as const;
@@ -58,6 +59,16 @@ type ApiMetrics = {
   retrieval_by_query: { query_index: number; n_retrieved: number; top_score: number; avg_score: number }[];
   quality_scores: { grader: string; score: number; source: string }[];
   avg_groundedness: number | null;
+  estimation_accuracy: {
+    per_epic: { epic: string; estimated: number; actual: number }[];
+    estimated_total: number;
+    actual_total: number;
+    bias_pct: number | null;
+    mae_pct: number | null;
+    calibration_factor: number;
+    calibration_samples: number;
+    calibration_bucket: string;
+  };
 };
 
 // ── Tab panels ────────────────────────────────────────────────────────────────
@@ -232,6 +243,57 @@ function TabRetrieval({ metrics }: { metrics?: ApiMetrics }) {
   );
 }
 
+function TabEstimation({ metrics }: { metrics?: ApiMetrics }) {
+  const acc = metrics?.estimation_accuracy;
+  const perEpic = acc?.per_epic ?? [];
+
+  const chartData = perEpic.map((e) => ({
+    epic: e.epic.length > 18 ? e.epic.slice(0, 17) + "…" : e.epic,
+    estimated: e.estimated,
+    actual: e.actual,
+  }));
+
+  const biasValue = acc?.bias_pct != null ? `${acc.bias_pct > 0 ? "+" : ""}${acc.bias_pct}%` : "—";
+  const maeValue = acc?.mae_pct != null ? `${acc.mae_pct}%` : "—";
+  const factor = acc?.calibration_factor ?? 1.0;
+  const factorValue = factor.toFixed(2) + "×";
+  const samples = acc?.calibration_samples ?? 0;
+  const bucket = acc?.calibration_bucket ?? "cold_start";
+
+  return (
+    <div className="flex flex-col gap-5">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <MetricsStatCard
+          label="Estimate Bias" value={biasValue}
+          delta={acc?.bias_pct != null ? (Math.abs(acc.bias_pct) <= 15 ? { value: "well calibrated", direction: "up" } : { value: acc.bias_pct > 0 ? "under-estimating" : "over-estimating", direction: "down" }) : undefined}
+          infoIcon={<MetricInfo what="Signed % gap between actual and estimated points across closed epics. +ve = work took more than estimated." why="Systematic bias means sprint plans are consistently wrong in one direction; the calibration factor corrects it." target="within ±15%" />}
+        />
+        <MetricsStatCard
+          label="Mean Abs Error" value={maeValue}
+          infoIcon={<MetricInfo what="Average absolute % error per epic, regardless of direction." why="Captures estimate volatility even when over- and under-estimates cancel out in the bias number." target="< 25%" />}
+        />
+        <MetricsStatCard
+          label="Calibration Factor" value={factorValue}
+          infoIcon={<MetricInfo what="Multiplier applied to future estimates, learned as mean(actual/estimated) over closed outcomes." why="Closes the feedback loop — the estimator self-corrects as real delivery data accumulates." target="approaches 1.00× as estimates improve" />}
+        />
+        <MetricsStatCard
+          label="Outcome Samples" value={samples} unit={bucket === "cold_start" ? "cold start" : bucket}
+          infoIcon={<MetricInfo what="Number of closed-epic outcomes backing the calibration factor." why="Below 3 samples the factor stays at 1.00× (no correction) to avoid distortion from a thin corpus." target="≥ 3 to activate" />}
+        />
+      </div>
+      <Card>
+        <div className="flex items-center gap-1 mb-3">
+          <span className="text-[11px] font-semibold uppercase tracking-wide text-text-muted">Estimated vs Actual Points per Epic</span>
+          <MetricInfo what="Side-by-side estimated and actual story points for each closed epic. Actuals are pulled back from GitHub via bidirectional sync." why="Visual gap per epic shows exactly where estimation drifts — a prerequisite for trustworthy planning." target="bars match" />
+        </div>
+        {chartData.length > 0
+          ? <MetricsBarChart data={chartData} xKey="epic" series={[{ key: "estimated", label: "Estimated" }, { key: "actual", label: "Actual" }]} height={200} />
+          : <div className="flex items-center justify-center h-[160px] text-sm text-text-muted">No actuals yet — sync epics to GitHub, then use “Refresh status” once issues close.</div>}
+      </Card>
+    </div>
+  );
+}
+
 function TabErrors({ metrics }: { metrics?: ApiMetrics }) {
   const errorsByPhase = metrics?.errors_by_phase ?? [];
   const totalErrors = metrics?.error_count ?? 0;
@@ -357,6 +419,7 @@ export default function MetricsPage({ params }: { params: Promise<{ id: string }
       {activeTab === "Token Usage & Cost" && <TabTokens   metrics={metricsData} />}
       {activeTab === "AI Quality"         && <TabQuality  metrics={metricsData} />}
       {activeTab === "Retrieval"          && <TabRetrieval metrics={metricsData} />}
+      {activeTab === "Estimation"         && <TabEstimation metrics={metricsData} />}
       {activeTab === "Error Handling"     && <TabErrors   metrics={metricsData} />}
       {activeTab === "Latency"            && <TabLatency  metrics={metricsData} />}
     </div>

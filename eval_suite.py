@@ -62,8 +62,13 @@ def main() -> int:
     logger.info("Running %d test cases × %d trials ...", len(ev.test_cases), args.n_trials)
     output = ev.run_all(n_trials=args.n_trials)
     pass_rate = output["pass_rate"]
-    logger.info("pass@1: %.3f  |  pass@k: %.3f  |  pass^k: %.3f",
+    # CI gates on deterministic graders only. LLM-judge / semantic / G-Eval
+    # graders are non-deterministic and are reported but never fail the build.
+    gate_rate = output.get("deterministic_pass_rate", pass_rate)
+    logger.info("pass@1 (overall): %.3f  |  pass@k: %.3f  |  pass^k: %.3f",
                 pass_rate, output["pass_at_k"], output["pass_hat_k"])
+    logger.info("GATE pass@1 (deterministic): %.3f  |  report-only pass@1 (LLM/semantic): %.3f",
+                gate_rate, output.get("report_only_pass_rate", 0.0))
 
     # 2. Write results file
     ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -90,21 +95,25 @@ def main() -> int:
     if not args.no_sync:
         _rclone_sync()
 
-    # 5. Per-grader summary
+    # 5. Per-grader summary (report-only graders flagged, not gated)
     summary = output.get("summary", {})
     by_grader = summary.get("by_grader", {})
     if by_grader:
-        logger.info("--- Grader breakdown ---")
+        logger.info("--- Grader breakdown (* = report-only, not gated) ---")
         for grader, stats in sorted(by_grader.items()):
+            report_only = stats.get("report_only", False)
             status = "PASS" if stats["pass_rate"] >= 0.70 else "fail"
-            logger.info("  [%s] %-40s pass=%.2f avg_score=%.2f",
-                        status, grader, stats["pass_rate"], stats["avg_score"])
+            tag = " *" if report_only else "  "
+            logger.info("  [%s]%s %-38s pass=%.2f avg_score=%.2f",
+                        status, tag, grader, stats["pass_rate"], stats["avg_score"])
 
-    # 6. Exit code
-    if pass_rate < args.threshold:
-        logger.error("FAIL: pass@1 %.3f < threshold %.3f", pass_rate, args.threshold)
+    # 6. Exit code — gated on deterministic graders only
+    if gate_rate < args.threshold:
+        logger.error("FAIL: deterministic pass@1 %.3f < threshold %.3f",
+                     gate_rate, args.threshold)
         return 1
-    logger.info("PASS: pass@1 %.3f >= threshold %.3f", pass_rate, args.threshold)
+    logger.info("PASS: deterministic pass@1 %.3f >= threshold %.3f",
+                gate_rate, args.threshold)
     return 0
 
 

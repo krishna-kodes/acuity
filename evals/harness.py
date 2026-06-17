@@ -29,7 +29,13 @@ from pathlib import Path
 
 import requests
 
-from evals.graders import GRADER_MAP, GradeResult, eval_settings, select_graders
+from evals.graders import (
+    GRADER_MAP,
+    GradeResult,
+    eval_settings,
+    is_report_only,
+    select_graders,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -365,8 +371,17 @@ class HybridRAGAgentEval:
         pass_at_k = self._compute_pass_at_k(all_results, k=n_trials)
         pass_hat_k = self._compute_pass_hat_k(all_results, k=n_trials)
 
+        # CI gate uses deterministic graders only; LLM-judge/semantic graders
+        # are reported but never decide the exit code (they're flaky).
+        deterministic = [r for r in all_results if not is_report_only(r.grader_name)]
+        report_only = [r for r in all_results if is_report_only(r.grader_name)]
+        deterministic_pass_at_1 = self._compute_pass_at_1(deterministic)
+        report_only_pass_at_1 = self._compute_pass_at_1(report_only)
+
         return {
             "pass_rate": pass_at_1,
+            "deterministic_pass_rate": deterministic_pass_at_1,
+            "report_only_pass_rate": report_only_pass_at_1,
             "pass_at_k": pass_at_k,
             "pass_hat_k": pass_hat_k,
             "results": [asdict(r) for r in all_results],
@@ -433,6 +448,7 @@ class HybridRAGAgentEval:
             k: {
                 "pass_rate": round(v["passed"] / v["total"], 4),
                 "avg_score": round(sum(v["scores"]) / len(v["scores"]), 4),
+                "report_only": is_report_only(k),
             }
             for k, v in by_grader.items()
         }

@@ -244,9 +244,25 @@ export async function triggerEpics(projectId: string): Promise<{ epics: Array<{ 
   return res.json()
 }
 
-export async function getEpics(projectId: string): Promise<{ epics: Array<{ id: number; title: string; description: string; sync_status: string; github_milestone_number: number | null; github_milestone_url: string | null; tracker_ref: string | null; tracker_url: string | null; tracker_type: string | null; tasks: Array<{ id: number; title: string; description: string; story_points: number; labels: string[]; sync_status: string; github_issue_number: number | null; github_issue_url: string | null; tracker_ref: string | null; tracker_url: string | null; tracker_type: string | null }> }> }> {
+export async function getEpics(projectId: string): Promise<{ epics: Array<{ id: number; title: string; description: string; estimated_points: number | null; actual_points: number | null; remote_state: string | null; sync_status: string; github_milestone_number: number | null; github_milestone_url: string | null; tracker_ref: string | null; tracker_url: string | null; tracker_type: string | null; tasks: Array<{ id: number; title: string; description: string; story_points: number; actual_points: number | null; remote_state: string | null; labels: string[]; sync_status: string; github_issue_number: number | null; github_issue_url: string | null; tracker_ref: string | null; tracker_url: string | null; tracker_type: string | null }> }> }> {
   const res = await fetch(`${_apiBase()}/api/v1/projects/${projectId}/epics`)
   if (!res.ok) throw new Error(`Fetch epics failed: ${res.status}`)
+  return res.json()
+}
+
+export type PullSyncResult = {
+  updated: number
+  closed: number
+  still_open: number
+  skipped_unsynced: number
+  outcomes_recorded: number
+  project_complete: boolean
+}
+
+/** Bidirectional sync — pull GitHub issue/milestone state (and actuals) back into the DB. */
+export async function pullSync(projectId: string): Promise<PullSyncResult> {
+  const res = await fetch(`${_apiBase()}/api/v1/projects/${projectId}/sync/pull`, { method: "POST" })
+  if (!res.ok) throw new Error(`Pull sync failed: ${res.status}`)
   return res.json()
 }
 

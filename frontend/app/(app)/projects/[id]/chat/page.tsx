@@ -352,13 +352,22 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
             } else if (event.type === "done") {
               queryClient.invalidateQueries({ queryKey: ["chat-history", projectId] });
               break;
+            } else if (event.type === "error") {
+              throw new Error(event.content ?? "Stream error");
             }
-          } catch { /* skip malformed lines */ }
+          } catch (e) {
+            if (e instanceof SyntaxError) continue; // partial/malformed SSE line
+            throw e;                                // propagate real stream errors
+          }
         }
       }
-    }).catch(() => {
+    }).catch((err) => {
+      const msg = err instanceof Error ? err.message : "";
+      const text = msg && !msg.startsWith("HTTP ")
+        ? msg
+        : "Couldn't load project summary. Ask me anything about the document.";
       setMessages((prev) =>
-        prev.map((m) => m.id === aiId ? { ...m, text: "Couldn't load project summary. Ask me anything about the document." } : m)
+        prev.map((m) => m.id === aiId ? { ...m, text, isError: true } : m)
       );
     }).finally(() => {
       setIsLoading(false);
@@ -496,8 +505,12 @@ export default function ChatPage({ params }: { params: Promise<{ id: string }> }
             } else if (event.type === "error") {
               throw new Error(event.content ?? event.message ?? "Stream error");
             }
-          } catch {
-            // skip malformed SSE lines
+          } catch (e) {
+            // A SyntaxError means a partial/malformed SSE line — skip it.
+            // Any other error (e.g. an "error" event we threw above, such as a
+            // budget-exceeded message) must propagate to the outer handler.
+            if (e instanceof SyntaxError) continue;
+            throw e;
           }
         }
       }

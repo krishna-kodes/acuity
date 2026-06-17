@@ -15,7 +15,7 @@ from app.models.guardrail import GuardrailLog
 from app.models.observability import ErrorLog, EvalResult, LatencyLog, Metric, QualityLog, RetrievalLog
 from app.models.pii import PIIDetection, PIIIngestionLog
 from app.models.project import Document, Project, Proposal, ProposalState
-from app.models.reference import ApprovedTechnology, HistoricalProject
+from app.models.reference import ApprovedTechnology, EstimationOutcome, HistoricalProject
 from app.models.sync import Epic, Task
 
 __all__ = [
@@ -27,7 +27,7 @@ __all__ = [
     "Project", "Document", "Proposal", "ProposalState",
     "Clarification",
     "Employee", "Skill", "EmployeeSkill",
-    "ApprovedTechnology", "HistoricalProject",
+    "ApprovedTechnology", "HistoricalProject", "EstimationOutcome",
     "Epic", "Task",
     "PIIDetection", "PIIIngestionLog",
     "Metric", "LatencyLog", "ErrorLog", "QualityLog", "RetrievalLog", "EvalResult",

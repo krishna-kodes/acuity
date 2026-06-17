@@ -7,8 +7,8 @@ from rank_bm25 import BM25Okapi
 from sentence_transformers import CrossEncoder
 
 from app.config import settings
-from app.services.embedder import get_collection
 from app.services.llm_factory import get_fast_llm
+from app.services.vector_store import vector_store
 
 _REWRITE_PROMPT = (
     "Generate {n} search queries to answer this question from a requirements document.\n"
@@ -38,32 +38,73 @@ def _rrf_score(rank: int, k: int = 60) -> float:
     return 1.0 / (k + rank)
 
 
+# Per-project BM25 cache. Building BM25Okapi loads the whole corpus and
+# re-tokenises every chunk; without this, every chat turn (×N sub-queries)
+# rebuilds the index from scratch. Validated by chunk count and explicitly
+# invalidated on re-embed (see embedder.embed_and_store).
+class _BM25Entry:
+    __slots__ = ("count", "bm25", "doc_texts", "doc_metadatas")
+
+    def __init__(self, count: int, bm25: BM25Okapi, doc_texts: list, doc_metadatas: list):
+        self.count = count
+        self.bm25 = bm25
+        self.doc_texts = doc_texts
+        self.doc_metadatas = doc_metadatas
+
+
+_bm25_cache: dict[str, _BM25Entry] = {}
+
+
+def invalidate_bm25(project_id: str) -> None:
+    """Drop the cached BM25 index for a project (call after upsert/delete)."""
+    _bm25_cache.pop(str(project_id), None)
+
+
+def _get_bm25(project_id: str) -> _BM25Entry | None:
+    """Return a cached/rebuilt BM25 index for the project, or None if empty."""
+    pid = str(project_id)
+    count = vector_store.count(pid)
+    if count == 0:
+        _bm25_cache.pop(pid, None)
+        return None
+
+    cached = _bm25_cache.get(pid)
+    if cached is not None and cached.count == count:
+        return cached
+
+    all_docs = vector_store.get_all(pid)
+    doc_texts = all_docs["documents"] or []
+    doc_metadatas = all_docs["metadatas"] or []
+    if not doc_texts:
+        _bm25_cache.pop(pid, None)
+        return None
+
+    tokenised = [t.lower().split() for t in doc_texts]
+    entry = _BM25Entry(count, BM25Okapi(tokenised), doc_texts, doc_metadatas)
+    _bm25_cache[pid] = entry
+    return entry
+
+
 async def retrieve_hybrid(
     project_id: str,
     queries: list[str],
     top_k: int = 20,
 ) -> list[dict]:
     """Fuse dense (ChromaDB) and sparse (BM25) retrieval via RRF."""
-    collection = get_collection(project_id)
-    all_docs = collection.get(include=["documents", "metadatas"])
-    doc_texts = all_docs["documents"] or []
-    doc_metadatas = all_docs["metadatas"] or []
-
-    if not doc_texts:
+    entry = _get_bm25(project_id)
+    if entry is None:
         return []
-
-    tokenised = [t.lower().split() for t in doc_texts]
-    bm25 = BM25Okapi(tokenised)
+    bm25 = entry.bm25
+    doc_texts = entry.doc_texts
+    doc_metadatas = entry.doc_metadatas
 
     rrf_scores: dict[str, float] = {}
     chunk_map: dict[str, dict] = {}
 
     for query in queries:
         # Dense retrieval via ChromaDB
-        dense_results = collection.query(
-            query_texts=[query],
-            n_results=min(top_k, len(doc_texts)),
-            include=["documents", "metadatas", "distances"],
+        dense_results = vector_store.query(
+            project_id, [query], n_results=min(top_k, len(doc_texts))
         )
         dense_docs = dense_results["documents"] or [[]]  # type: ignore[index]
         dense_metas = dense_results["metadatas"] or [[]]  # type: ignore[index]

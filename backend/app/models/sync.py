@@ -17,6 +17,9 @@ class Epic(Base):
     title: Mapped[str] = mapped_column(String(500), nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
     estimated_points: Mapped[int | None] = mapped_column(Integer)
+    actual_points: Mapped[int | None] = mapped_column(Integer)  # filled by bidirectional pull
+    remote_state: Mapped[str | None] = mapped_column(String(20))  # 'open' | 'closed' (tracker milestone state)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime)
     github_milestone_number: Mapped[int | None] = mapped_column(Integer)
     github_milestone_url: Mapped[str | None] = mapped_column(String(500))
     tracker_ref: Mapped[str | None] = mapped_column(String(200), nullable=True)
@@ -39,6 +42,9 @@ class Task(Base):
     title: Mapped[str] = mapped_column(String(500), nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
     estimated_points: Mapped[int | None] = mapped_column(Integer)
+    actual_points: Mapped[int | None] = mapped_column(Integer)  # filled by bidirectional pull
+    remote_state: Mapped[str | None] = mapped_column(String(20))  # 'open' | 'closed' (tracker issue state)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime)
     github_issue_number: Mapped[int | None] = mapped_column(Integer)
     github_issue_url: Mapped[str | None] = mapped_column(String(500))
     tracker_ref: Mapped[str | None] = mapped_column(String(200), nullable=True)

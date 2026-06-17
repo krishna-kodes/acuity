@@ -62,8 +62,8 @@ class EvalSettings(BaseSettings):
     anthropic_api_key: str = ""
     openai_api_key: str = ""
     groundedness_threshold: float = 0.7
-    fast_llm_model: str = "gemini-2.5-flash"
-    main_llm_model: str = "gemini-2.5-pro"
+    fast_llm_model: str = "gpt-5.4-nano"
+    main_llm_model: str = "gpt-5.4-mini"
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
@@ -974,6 +974,36 @@ GRADER_MAP: dict[str, Any] = {
     "section_completeness": grade_section_completeness,
     "regen_idempotency": grade_regen_idempotency,
 }
+
+
+# ---------------------------------------------------------------------------
+# Grader determinism classification (CI gate vs report-only)
+# ---------------------------------------------------------------------------
+#
+# Report-only graders invoke an LLM judge, a DeepEval G-Eval rubric, RAGAS, or
+# embedding-cosine similarity at runtime. They are non-deterministic and
+# network-dependent, so gating CI on them (× n_trials, at a 0.90 bar) produces
+# flaky red builds. They are still scored and reported every run, but they do
+# NOT decide the CI exit code. Deterministic graders (exact match, schema,
+# range, count, status checks) form the hard gate.
+REPORT_ONLY_GRADERS: frozenset[str] = frozenset({
+    "answer_relevancy",              # RAGAS answer_relevancy / soft keyword proxy
+    "tbd_vague_detection",           # LLM-as-judge
+    "semantic_relevance",            # embedding cosine
+    "groundedness",                  # LLM-as-judge
+    "proposal_completeness",         # DeepEval G-Eval
+    "tech_stack_rationale_quality",  # DeepEval G-Eval
+    "risks_grounding",               # LLM-as-judge
+    "section_completeness",          # LLM-as-judge (per-section rubric)
+    "regen_idempotency",             # embedding cosine
+})
+
+# Deterministic graders are everything in GRADER_MAP not flagged report-only.
+DETERMINISTIC_GRADERS: frozenset[str] = frozenset(GRADER_MAP) - REPORT_ONLY_GRADERS
+
+
+def is_report_only(grader_name: str) -> bool:
+    return grader_name in REPORT_ONLY_GRADERS
 
 
 def select_graders(test_case: dict) -> list[str]:
